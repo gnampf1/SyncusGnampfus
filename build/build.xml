@@ -10,12 +10,13 @@
 
   <resolver:resolve failOnMissingAttachments="false">
     <resolver:dependencies>
-      <resolver:dependency groupId="org.json" artifactId="json" version="20250517" />
-      <resolver:dependency groupId="org.htmlunit" artifactId="htmlunit" version="4.13.0" />
+      <resolver:dependency groupId="org.json" artifactId="json" version="20190722" />
+      <resolver:dependency groupId="org.htmlunit" artifactId="htmlunit" version="4.4.0" />
       <resolver:dependency groupId="website.magyar" artifactId="mitm-java-proxy" version="2.5.28.127" />
       <resolver:dependency groupId="com.microsoft.playwright" artifactId="playwright" version="1.52.0" />
 <!-- Maven-Version ist für Java >17 compiliert, daher nicht nutzbar -->
 <!--      <resolver:dependency groupId="io.github.kihdev.playwright-stealth-4j" artifactId="playwright-stealth-4j" version="1.0.0" />-->
+      <resolver:dependency groupId="org.jetbrains.kotlin" artifactId="kotlin-stdlib" version="2.2.0" />
     </resolver:dependencies>
     <resolver:files refid="src.files" dir="lib" layout="{artifactId}-{classifier}.{extension}"/>
   </resolver:resolve>

@@ -28,7 +28,6 @@ Kundenkennung muss hier dem Benutzernamen fürs Onlinebanking entsprechen, IBAN 
 Sowohl die Hanseatic-Kreditkarten-Konten als auch die American Express-Konten, die mit Mashup angelegt wurden, können weiter verwendet werden. Dazu in den Einstellungen vom Konto die Zugangsart von *non-HBCI (Hibiscus-Mashup)* auf *AMEX* bzw. *HanseaticBank* ändern. Im Falle von Amex vor dem ersten Rundruf noch in die Synchronisierungsoptionen des Kontos gehen und sicherstellen das ein Haken bei *Inhalte statt TransaktionsId vergleichen (Daten+bernahme von Mashup)* gesetzt ist, da andernfalls Duplikate angelegt werden. Der Haken wird nach dem ersten erfolgreichen Sync entfernt und nicht mehr benötigt, da ab jetzt die eindeutigen Transaktions-IDs gepflegt sind
 
 ## Bekannte Probleme
-- Unter seinem richtigen Namen wird das Plugin leider nach Mashup & Co geladen, und hat dann mit veralteten Abhängigkeiten zu kämpfen. Bis zum Fix einfach das Verzeichnis SyncusGnampfus im Jamecia-Plugins-Verzeichnis in aSyncusGnampfus umbenennen und Jameica neu starten. 
 - AMEX wurde nicht mit der App getestet. Kann klappen, muss aber nicht. Evtl. kracht es schon wenn die App registriert ist, bitte testen und Feedback geben
 - AMEX unterstützt nur eine Karte je Account. Was passiert wenn in einem Account mehrere Karten hinterlegt sind? Findets heraus und berichtet ;-)
 - bei Umstellung von Mashup kann es bei der Hanseaticbank noch einmalig zu Doppeleinträgen kommen

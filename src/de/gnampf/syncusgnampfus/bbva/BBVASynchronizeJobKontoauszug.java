@@ -134,7 +134,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			Logger.info("Login war erfolgreich");
 
 			response = doRequest("https://de-net.bbva.com/financial-overview/v1/financial-overview?customer.id=" + personId + "&showSicav=false&showPending=true", HttpMethod.GET, headers, null, null);
-			JSONArray contracts = response.getJSONObject().optJSONObject("data", new JSONObject()).optJSONArray("contracts", new JSONArray());
+			JSONArray contracts = response.getJSONObject().optJSONObject("data").optJSONArray("contracts");
 			var ktoContract = new Object() { JSONObject value = null; };
 			var myIban = konto.getIban();
 			contracts.forEach(c -> 
@@ -182,7 +182,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				});
 
 				response = doRequest("https://de-net.bbva.com/accounts/v0/accounts/" + contractId + "/dispokredits/validations/", HttpMethod.GET, headers, null, null);
-				JSONObject dispo = response.getJSONObject().optJSONObject("data", new JSONObject());
+				JSONObject dispo = response.getJSONObject().optJSONObject("data");
 				if (dispo != null)
 				{
 					dispo.optJSONArray("dispokreditAmounts").forEach(d ->
