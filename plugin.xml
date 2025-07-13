@@ -6,7 +6,7 @@
         name="SyncusGnampfus" version="0.0.1" class="de.gnampf.syncusgnampfus.Plugin">
 
   <description>Hibiscus Plugin zur Kontensynchronisation für Hanseatic &amp; American Express Kreditkarten sowie BBVA Girokonten </description>
-  <homepage></homepage>
+  <homepage>https://github.com/gnampf1/SyncusGnampfus</homepage>
   <license>GPL - http://www.gnu.org/copyleft/gpl.html</license>
 
   <requires jameica="2.6.0+">

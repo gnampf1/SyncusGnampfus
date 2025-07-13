@@ -6,7 +6,12 @@ Unterstützung für den Umsatz- und Saldoabruf bei folgenden Banken
  - BBVA Girokonto (nur Umsatzabruf)
 
 ## Einrichtung
-Das Plugin als ZIP-File aus den Releases in Hibiscus importieren. Ein Repository existiert (noch) nicht für den Abruf direkt aus Hibiscus heraus.
+Entweder das Plugin als ZIP-File aus den Github-Releases in Hibiscus importieren, oder in den Jameica-Einstellungen unter *Plugins / Repositories bearbeiten* die URL https://www.gnampf.cyou/hibiscus ergänzen und unter *verfügbare Plugins* auswählen. Beim ersten Mal muss das Zertifikat akzeptiert werden, daher hier zum Abgleich:
+- Common Name (CN) *syncusgnampfus updates*
+- Organisation (O) *gnampf*
+- SHA256: 24:EC:21:F3:F3:B4:60:EF:1F:87:22:E0:CC:D3:A5:66:7F:0A:C8:4C:D2:6F:AA:B1:1E:8B:A0:FF:53:77:A1:BB
+- SHA1: 79:F6:57:C5:FB:45:AA:D1:4C:59:ED:B1:16:AD:59:82:BE:18:FB:8F
+  
 Konten müssen von Hand angelegt werden, dafür unter **Konten** auf **Konto manuell anlegen** gehen. Keinen Haken bei **Offline-Konto** setzen!
 
 ### American Express
