@@ -477,13 +477,13 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				{
 					vorhandenerUmsatz.setFlags(Umsatz.FLAG_NONE);
 					vorhandenerUmsatz.store();
-					Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz))
+					Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
 				}
 				if (vorhandenerUmsatz.getTransactionId() == null)
 				{
 					vorhandenerUmsatz.setTransactionId(newUmsatz.getTransactionId());
 					vorhandenerUmsatz.store();
-					Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz))
+					Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
 				}
 				duplicates = true;
 			}
