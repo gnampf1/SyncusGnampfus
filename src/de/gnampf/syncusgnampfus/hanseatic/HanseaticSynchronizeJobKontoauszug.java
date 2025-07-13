@@ -1,0 +1,372 @@
+package de.gnampf.syncusgnampfus.hanseatic;
+
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
+import java.net.URLEncoder;
+import java.rmi.RemoteException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Hashtable;
+import javax.annotation.Resource;
+
+import org.htmlunit.CookieManager;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.Page;
+import org.htmlunit.ProxyConfig;
+import org.htmlunit.WebClient;
+import org.htmlunit.WebRequest;
+import org.htmlunit.html.HtmlPage;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJob;
+import de.gnampf.syncusgnampfus.KeyValue;
+import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobKontoauszug;
+import de.gnampf.syncusgnampfus.WebResult;
+import de.willuhn.datasource.rmi.DBIterator;
+import de.willuhn.jameica.hbci.Settings;
+import de.willuhn.jameica.hbci.SynchronizeOptions;
+import de.willuhn.jameica.hbci.messaging.ImportMessage;
+import de.willuhn.jameica.hbci.messaging.ObjectChangedMessage;
+import de.willuhn.jameica.hbci.messaging.ObjectDeletedMessage;
+import de.willuhn.jameica.hbci.messaging.SaldoMessage;
+import de.willuhn.jameica.hbci.rmi.Konto;
+import de.willuhn.jameica.hbci.rmi.Umsatz;
+import de.willuhn.jameica.hbci.synchronize.SynchronizeBackend;
+import de.willuhn.jameica.hbci.synchronize.jobs.SynchronizeJobKontoauszug;
+import de.willuhn.jameica.security.Wallet;
+import de.willuhn.jameica.system.Application;
+import de.willuhn.logging.Level;
+import de.willuhn.logging.Logger;
+import de.willuhn.util.ApplicationException;
+import de.willuhn.util.ProgressMonitor;
+
+// Spezifisch, eigentliche Implementierung
+
+public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
+{
+	@Override
+	protected String getVersion() { return "0.1"; }
+
+	@Resource
+	private HanseaticSynchronizeBackend backend = null;
+	
+	@Override
+	protected SynchronizeBackend getBackend() { return backend; }
+
+	@Override
+	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort)
+	{
+		try 
+		{
+			log(Level.DEBUG, "besorge Basic-Credentials");
+			var response = doRequest("https://meine.hanseaticbank.de/de/register/sign-in", HttpMethod.GET, null, null, null);
+			var textContent = response.getContent().replace("\n", "").replace("\r", "");
+			var basicAuth = textContent.replaceAll(".*BASIC_AUTH:\"Basic ([^\"]+)\".*", "$1");
+			var baseUrl = textContent.replaceAll(".*NORTHLAYER_BASE_URL:\"([^\"]+)\".*", "$1");
+			log(Level.DEBUG, "Basic-Auth-Token ist " + basicAuth + ", BaseUrl: " + baseUrl);
+			permanentHeaders.clear();
+			permanentHeaders.add(new KeyValue<>("authorization", "Basic " + basicAuth));
+
+			var request = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
+			if (request.getHttpStatus() != 200)
+			{
+				log(Level.ERROR, "Login fehlgeschlagen, Fehlercode " + request.getHttpStatus());
+				log(Level.DEBUG, "Response: " + request.getContent());
+				monitor.setPercentComplete(100);
+				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+				return false;
+			}
+			
+			JSONObject json = request.getJSONObject();
+			String token = json.optString("access_token");
+			if (token == null || token.isBlank())
+			{
+				log(Level.ERROR, "Login fehlgeschlagen, kein AccessToken");
+				log(Level.DEBUG, "Response: " + request.getContent());
+				monitor.setPercentComplete(100);
+				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+				return false;
+			}
+
+			var tokenType = json.optString("token_type");
+			if (tokenType == null)
+			{
+				tokenType ="Bearer";
+			}
+			permanentHeaders.clear();
+			permanentHeaders.add(new KeyValue<>("authorization", tokenType + " " + token));
+
+			log(Level.INFO, "Login f\u00fcr " + user + " war erfolgreich");
+			monitor.setPercentComplete(5); 
+
+			response = doRequest(baseUrl + "/pairingSecureApp/1.0/activateCreditCards", HttpMethod.PUT, null, null, null);
+			if (response.getHttpStatus() != 200)
+			{
+				log(Level.ERROR, "ActivateCreditCards fehlgeschlagen");
+				log(Level.DEBUG, "Response: " + request.getContent());
+				monitor.setPercentComplete(100);
+				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+				return true;
+			}
+
+			response = doRequest(baseUrl + "/customerportal/1.0/accounts?skipCache=false", HttpMethod.GET, null, null, null);
+			if (response.getHttpStatus() != 200)
+			{
+				log(Level.ERROR, "Accountabfrage fehlgeschlagen");
+				log(Level.DEBUG, "Response: " + request.getContent());
+				monitor.setPercentComplete(100);
+				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+				return true;
+			}
+			Boolean found = false;
+			var accountsArray = new JSONArray(response.getContent());
+			Double saldo = konto.getSaldo();
+			for (var obj : accountsArray) 
+			{
+				JSONObject account = (JSONObject)obj;
+				if (user.equals(account.optString("customerNumber")) && konto.getKontonummer().equals(account.optString("accountNumber")))
+				{
+					saldo = account.optDouble("saldo");
+					found = true;
+					
+					if (fetchSaldo)
+					{
+						konto.setSaldo(saldo);
+						konto.setSaldoAvailable(account.optDouble("availableAmount"));
+						konto.store();
+						Application.getMessagingFactory().sendMessage(new SaldoMessage(konto));
+					}
+					break;
+				}
+			};
+
+			if (!found)
+			{
+				log(Level.ERROR, "Konto nicht gefunden");
+				log(Level.DEBUG, "Response: " + request.getContent());
+				monitor.setPercentComplete(100);
+				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+				return true;
+			}
+			monitor.setPercentComplete(10);
+
+			if (fetchUmsatz)
+			{
+				var arbeitsSaldo = saldo;
+				var gotDuplicate = false;
+				var more = false;
+				var moreWithSCA = false;
+				var scaDone = false;
+				var pageNo = 0;
+				var neueUmsaetze = new ArrayList<Umsatz>();
+				var duplikate = new ArrayList<Umsatz>();
+				var dateFormat = new SimpleDateFormat("dd.MM.yyyy");
+				do
+				{
+					pageNo++;
+
+					response = doRequest(baseUrl + "/transaction/1.0/transactionsEnriched/" + konto.getKontonummer() + "?page=" + pageNo + "&withReservations=true&withEnrichments=true", HttpMethod.GET, null, null, null);
+					if (response.getHttpStatus() != 200)
+					{
+						log(Level.ERROR, "Umsatzabruf fehlgeschlagen");
+						log(Level.DEBUG, "Response: " + request.getContent());
+						monitor.setPercentComplete(100);
+						monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+						return true;
+					}
+					json = response.getJSONObject();
+					JSONArray transactionsArray = json.optJSONArray("transactions", new JSONArray());
+					more = json.optBoolean("more", false);
+					moreWithSCA = json.optBoolean("moreWithSCA", false);
+
+					log(Level.INFO, "lese Seite "+pageNo);
+					monitor.setPercentComplete(monitor.getPercentComplete() + 1);
+
+					for (var obj : transactionsArray)
+					{
+						var transaction = (JSONObject)obj;
+
+						var betrag = transaction.getDouble("amount");
+						var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
+						newUmsatz.setKonto(konto);
+						newUmsatz.setBetrag(betrag);
+						newUmsatz.setDatum(dateFormat.parse(transaction.getString("transactionDate")));
+						newUmsatz.setGegenkontoBLZ(transaction.optString("recipientBic"));
+						newUmsatz.setGegenkontoName(transaction.optString("recipientName"));
+						newUmsatz.setGegenkontoNummer(transaction.optString("recipientIban"));
+						newUmsatz.setValuta(dateFormat.parse(transaction.getString("date") + " 00:00"));
+						newUmsatz.setZweck(transaction.optString("description"));
+						newUmsatz.setArt(transaction.optString("creditDebitKey"));
+
+						ArrayList<String> details = new ArrayList<String>();
+
+						var website = transaction.getJSONObject("merchantData").getString("website");
+						if (website != null && !website.isBlank()) details.add("Web: " + website);
+						var transactionTime = transaction.optString("transactionTime");
+						if (transactionTime != null && !transactionTime.isBlank()) details.add("Zeit: " + transactionTime);
+						var conversionRate = transaction.optString("conversionRate");
+						if (conversionRate != null && !conversionRate.isBlank()) details.add("Wechselkurs: " + conversionRate);
+
+						newUmsatz.setCreditorId(transaction.optString("creditorID"));
+						newUmsatz.setMandateId(transaction.optString("mandateReference"));
+						newUmsatz.setCustomerRef(transaction.optString("transactionId"));
+
+						for (int j = 0; j < details.size(); j++)
+						{
+							if (details.get(j).length() > 35) 
+							{
+								details.add(j + 1, details.get(j).substring(35));
+								details.set(j, details.get(j).substring(0,35));
+							}
+						}
+						newUmsatz.setWeitereVerwendungszwecke(details.toArray(new String[0]));
+						if (transaction.optBoolean("booked", true) == false)
+						{
+							newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
+						}
+						else 
+						{
+							newUmsatz.setSaldo(arbeitsSaldo); // Zwischensaldo
+							arbeitsSaldo -= betrag;
+						}
+
+						var duplicate = getDuplicateByCompare(newUmsatz); 
+						if (duplicate != null)
+						{		                		
+							gotDuplicate = true;
+							if (duplicate.hasFlag(Umsatz.FLAG_NOTBOOKED))
+							{
+								duplicate.setFlags(newUmsatz.getFlags());
+								duplicate.setSaldo(newUmsatz.getSaldo());
+								duplicate.setWeitereVerwendungszwecke(newUmsatz.getWeitereVerwendungszwecke());
+
+								duplicate.setGegenkontoBLZ(newUmsatz.getGegenkontoBLZ());
+								duplicate.setGegenkontoName(newUmsatz.getGegenkontoName());
+								duplicate.setGegenkontoNummer(newUmsatz.getGegenkontoNummer());
+								duplicate.setValuta(newUmsatz.getValuta());
+								duplicate.setArt(newUmsatz.getArt());
+								duplicate.setCreditorId(newUmsatz.getCreditorId());
+								duplicate.setMandateId(newUmsatz.getMandateId());
+								duplicate.setCustomerRef(newUmsatz.getCustomerRef());
+								duplicate.store();
+								duplikate.add(duplicate);
+								Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(duplicate));
+							}
+						}
+						else
+						{
+							neueUmsaetze.add(newUmsatz);
+						}
+					}
+
+					if (!gotDuplicate && !more && moreWithSCA && !scaDone)
+					{
+						log(Level.INFO, "Benötige zweiten Faktor für weitere Umsätze...");
+
+						String status = null;
+						var resultCode = 0;
+
+						do 
+						{
+							response = doRequest(baseUrl + "/scaBroker/1.0/session", HttpMethod.POST, null, "application/json", "{\"initiator\":\"ton-sca-fe\",\"lang\":\"de\",\"session\":\"" + token + "\"}");
+							if (response.getHttpStatus() != 200)
+							{
+								log(Level.ERROR, "2FA-Abruf fehlgeschlagen");
+								log(Level.DEBUG, "Response: " + request.getContent());
+								monitor.setPercentComplete(100);
+								monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+								return true;
+							}
+							json = response.getJSONObject();	    	                
+							var type = json.optString("scaType", "Unbekannt");
+							var uniqueId = json.optString("scaUniqueId");
+
+							var requestText = "Bitte geben Sie die TAN ein, das sie per " + type + " erhalten haben.";
+							if (status != null)
+							{
+								requestText += "\nDer letzte Code wurde nicht akzeptiert, Status " + resultCode + " / " + status;
+							}
+
+		                	var sca = Application.getCallback().askUser(requestText, "TAN:");
+							if (sca == null || sca.isBlank())
+							{
+								more = false;
+								moreWithSCA = false;
+								log(Level.WARN, "TAN-Eingabe abgebrochen");
+								break;
+							}
+							else
+							{
+								response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.PUT, null, "application/json", "{\"otp\":\"" + sca + "\"}");
+								if (response.getHttpStatus() != 200)
+								{
+									log(Level.ERROR, "2FA-Validierung fehlgeschlagen");
+									log(Level.DEBUG, "Response: " + request.getContent());
+									monitor.setPercentComplete(100);
+									monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+									return true;
+								}
+								json = response.getJSONObject();
+								status = json.optString("status");
+								resultCode = json.optInt("resultCode");
+
+								if (!"complete".equals(status) || resultCode != 200)
+								{
+									log(Level.ERROR, "2FA-Validierung fehlgeschlagen, Status = " + status + ", Result = " + resultCode);
+									log(Level.DEBUG, "Response: " + request.getContent());
+									monitor.setPercentComplete(100);
+									monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+									return true;
+								}
+								else
+								{
+									scaDone = true;
+									neueUmsaetze.clear();
+									arbeitsSaldo = saldo;
+									pageNo = 0;
+									log(Level.INFO, "Starte Umsatzabfrage neu nach Eingabe zweiter Faktor");
+									break;
+								}
+							}
+						}
+						while (true);
+					}	                
+				} while (!gotDuplicate && (more || moreWithSCA));
+
+				monitor.setPercentComplete(75); 
+				log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");
+
+				reverseImport(neueUmsaetze);
+				
+				log(Level.INFO, "Import erfolgreich. Prüfe Reservierungen ...");
+				monitor.setPercentComplete(95); 
+
+				umsaetze.begin();
+				while (umsaetze.hasNext())
+				{
+					Umsatz umsatz = umsaetze.next();
+					if (umsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
+					{
+						if (!duplikate.contains(umsatz))
+						{
+							var id = umsatz.getID();
+							umsatz.delete();
+							Application.getMessagingFactory().sendMessage(new ObjectDeletedMessage(umsatz, id));
+						}
+					}
+				}
+			}
+		} 
+		catch (Exception ex) 
+		{
+			log(Level.ERROR, "Unbekannter Fehler " + ex.toString());
+			monitor.setPercentComplete(100);
+			monitor.setStatus(ProgressMonitor.STATUS_ERROR);
+			return false;
+		}
+		
+		return true;
+	}
+}

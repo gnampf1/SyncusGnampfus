@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+
+<plugin xmlns="http://www.willuhn.de/schema/jameica-plugin"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.willuhn.de/schema/jameica-plugin http://www.willuhn.de/schema/jameica-plugin-1.2.xsd"
+        name="SyncusGnampfus" version="0.0.1" class="de.gnampf.syncusgnampfus.Plugin">
+
+  <description>Hibiscus Plugin zur Kontensynchronisation für Hanseatic &amp; American Express Kreditkarten sowie BBVA Girokonten </description>
+  <homepage></homepage>
+  <license>GPL - http://www.gnu.org/copyleft/gpl.html</license>
+
+  <requires jameica="2.6.0+">
+    <import plugin="hibiscus" version="2.6.0+" />
+  </requires>
+
+
+  <classfinder>
+    <include>SyncusGnampfus\.jar</include>
+    <include>.*\.class</include>
+    <include>ext_.*\.jar</include>
+  </classfinder>
+</plugin>
+
