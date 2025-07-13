@@ -8,6 +8,7 @@ import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobProviderKontoauszug;
 import de.willuhn.jameica.hbci.rmi.Konto;
 import de.willuhn.jameica.hbci.synchronize.AbstractSynchronizeBackend;
 import de.willuhn.jameica.hbci.synchronize.jobs.SynchronizeJob;
+import de.willuhn.logging.Logger;
 
 public class AMEXSynchronizeJobProviderKontoauszug extends SyncusGnampfusSynchronizeJobProviderKontoauszug 
 {
@@ -30,11 +31,11 @@ public class AMEXSynchronizeJobProviderKontoauszug extends SyncusGnampfusSynchro
     {
     	try 
     	{
-    		return konto.getBLZ().equals("50070010");
-    	}
-    	catch (RemoteException e)
+			return AMEXSynchronizeBackend.class.getName().equals(konto.getBackendClass());
+		} 
+    	catch (RemoteException e) 
     	{
-    		return false;
+        	return false;
     	}
     }
 }

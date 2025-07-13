@@ -16,35 +16,43 @@ public class AMEXRequestInterceptor implements RequestInterceptor
 	public String Body = null;
 	public String Url = null;
 	public ArrayList<KeyValue<String, String>> Header = new ArrayList<KeyValue<String, String>>();
-	    public AMEXRequestInterceptor() {
-	    }
+	public AMEXRequestInterceptor() {
+	}
 
-	    public void process(final MitmJavaProxyHttpRequest request) {
-	    	HttpRequestBase b = request.getMethod();
-	        
-	    	String path = b.getURI().getPath().toLowerCase(); 
-	    	if (path.equals("/myca/logon/emea/action/login") && b.getMethod() == "POST")
-	    	{
-	    		try 
-	    		{
-	    			for (Header h : b.getAllHeaders())
-	    			{
-	    				Header.add(new KeyValue<>(h.getName(), h.getValue()));
-	    			}
-	    			HttpPost post = (HttpPost)b;
-	    			Body = new String(post.getEntity().getContent().readAllBytes(), StandardCharsets.UTF_8);
-	    			Url = b.getURI().toString();
-	    		}catch (Exception e) { }
-	    	}
+	public void process(final MitmJavaProxyHttpRequest request) {
+		HttpRequestBase b = request.getMethod();
 
-	    	if (Url != null)
-	    	{
-	    		try 
-	    		{
-	    			b.setURI(new URI("http://gibtsnicht/nirgends"));
-	    		}
-	    		catch (Exception e) {}
-	    		b.abort();
-	    	}
-	    }
+		String path = b.getURI().getPath().toLowerCase(); 
+		if (path.equals("/myca/logon/emea/action/login") && b.getMethod() == "POST")
+		{
+			try 
+			{
+				Header.clear();
+				for (Header header : b.getAllHeaders())
+				{
+					String key = header.getName().toLowerCase().trim();
+					if (!"content-type".equals(key) &&
+							!"host".equals(key) &&
+							!"cookie".equals(key))
+					{
+						Header.add(new KeyValue<>(header.getName(), header.getValue()));
+					}
+				}
+				HttpPost post = (HttpPost)b;
+				Body = new String(post.getEntity().getContent().readAllBytes(), StandardCharsets.UTF_8);
+				Url = b.getURI().toString();
+			}
+			catch (Exception e) { }
+		}
+
+		if (Url != null)
+		{
+			try 
+			{
+				b.setURI(new URI("http://gibtsnicht/nirgends"));
+			}
+			catch (Exception e) {}
+			b.abort();
+		}
+	}
 }

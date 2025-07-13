@@ -39,6 +39,7 @@ import de.willuhn.jameica.security.Wallet;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.logging.Level;
 import de.willuhn.logging.Logger;
+import de.willuhn.util.ApplicationException;
 import de.willuhn.util.ProgressMonitor;
 
 public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
@@ -55,7 +56,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	 * @see org.jameica.hibiscus.sync.example.ExampleSynchronizeJob#execute()
 	 */
 	@Override
-	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort)
+	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
 		ArrayList<KeyValue<String, String>> headers = new ArrayList<>();
 		try 
@@ -79,17 +80,15 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						otp = Application.getCallback().askUser("Bitte geben Sie den SMS-Code ein.", "SMS-Code");
 						if (otp == null || otp.isEmpty()) 
 						{
-							log(Level.ERROR, "TAN-Abfrage abgebrochen");
-							monitor.setPercentComplete(100);
-							monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-							return false;
+							throw new ApplicationException("TAN-Abfrage abgebrochen");
 						}
 					}
 					while (otp.length() != 6);
 
 					headers.add(new KeyValue<>("authenticationstate", multistepProcessId));
 					response = doRequest("https://de-net.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.POST, headers, "application/json", "{\"authentication\":{\"consumerID\":\"00000366\",\"authenticationType\":\"121\",\"userID\":\"" + user +"\",\"multistepProcessId\":\"" + multistepProcessId + "\",\"authenticationData\":[{\"authenticationData\":[\"" + otp + "\"],\"idAuthenticationData\":\"otp\"}]}}");
-					authState = response.getJSONObject().optString("authenticationState");
+					json = response.getJSONObject();
+					authState = json.optString("authenticationState");
 				}
 			}
 
@@ -108,18 +107,15 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			if (!"OK".equals(authState) && userId != null && personId != null)
 			{
-				log(Level.ERROR, "Login fehlgeschlagen! AuthState ist " + authState);
 				log(Level.DEBUG, "Response: " + response.getContent());
-				monitor.setPercentComplete(100);
-				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-				return false;
+				throw new ApplicationException("Login fehlgeschlagen! AuthState ist " + authState);
 			}
 
 			headers.clear();
 			String tsec = null;
 			for (var header : response.getResponseHeader())
 			{
-				if (header.getName() == "tsec")
+				if ("tsec".equals(header.getName()))
 				{
 					tsec = header.getValue();
 				}
@@ -131,17 +127,14 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			response = doRequest("https://portunus-hub-es.live.global.platform.bbva.com/v1/tsec", HttpMethod.GET, tsecheaders, null, null);
 			if (response.getHttpStatus() != 200)
 			{
-				log(Level.ERROR, "TSEC-Abfrage fehlgeschlagen! AuthState ist " + authState);
 				log(Level.DEBUG, "Response: " + response.getContent());
-				monitor.setPercentComplete(100);
-				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-				return false;
+				throw new ApplicationException("TSEC-Abfrage fehlgeschlagen! AuthState ist " + authState);
 			}
 
 			Logger.info("Login war erfolgreich");
 
 			response = doRequest("https://de-net.bbva.com/financial-overview/v1/financial-overview?customer.id=" + personId + "&showSicav=false&showPending=true", HttpMethod.GET, headers, null, null);
-			JSONArray contracts = response.getJSONObject().getJSONArray("contracts");
+			JSONArray contracts = response.getJSONObject().optJSONObject("data", new JSONObject()).optJSONArray("contracts", new JSONArray());
 			var ktoContract = new Object() { JSONObject value = null; };
 			var myIban = konto.getIban();
 			contracts.forEach(c -> 
@@ -159,11 +152,8 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			if (ktoContract.value == null)
 			{
-				log(Level.ERROR, "Konto mit IBAN " + konto.getIban() + " nicht gefunden!");
 				log(Level.DEBUG, "Response: " + response.getContent());
-				monitor.setPercentComplete(100);
-				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-				return true;
+				throw new ApplicationException("Konto mit IBAN " + konto.getIban() + " nicht gefunden!");
 			}
 
 			var contractId = ktoContract.value.optString("id");
@@ -187,13 +177,12 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					}
 					catch (RemoteException ex) 
 					{            	
-						Logger.error("BBVA: Fehler beim Setzen vom Saldo: " + ex.toString());
-						monitor.log("Fehler beim Setzen vom Saldo");
+						log(Level.ERROR, "Fehler beim Setzen vom Saldo: " + ex.toString());
 					}
 				});
 
 				response = doRequest("https://de-net.bbva.com/accounts/v0/accounts/" + contractId + "/dispokredits/validations/", HttpMethod.GET, headers, null, null);
-				JSONObject dispo = response.getJSONObject();
+				JSONObject dispo = response.getJSONObject().optJSONObject("data", new JSONObject());
 				if (dispo != null)
 				{
 					dispo.optJSONArray("dispokreditAmounts").forEach(d ->
@@ -206,8 +195,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 								konto.setSaldoAvailable(konto.getSaldoAvailable() + dispoAmount.getJSONObject("amount").getDouble("amount"));
 							} catch (RemoteException ex)
 							{
-								Logger.error("BBVA: Fehler beim Setzen vom Dispo-Saldo: " + ex.toString());
-								monitor.log("Fehler beim Setzen vom Dispo-Saldo");
+								log(Level.ERROR, "Fehler beim Setzen vom Dispo-Saldo: " + ex.toString());								monitor.log("Fehler beim Setzen vom Dispo-Saldo");
 							}
 						}
 					});
@@ -303,13 +291,6 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			reverseImport(neueUmsaetze);
 		} 
-		catch (Exception ex) 
-		{
-			log(Level.ERROR, "Unbekannter Fehler " + ex.toString());
-			monitor.setPercentComplete(100);
-			monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-			return false;
-		}
 		finally
 		{
 			// Logout

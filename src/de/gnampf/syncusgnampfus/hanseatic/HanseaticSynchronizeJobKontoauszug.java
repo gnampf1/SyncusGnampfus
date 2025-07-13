@@ -1,5 +1,6 @@
 package de.gnampf.syncusgnampfus.hanseatic;
 
+import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
@@ -11,6 +12,7 @@ import java.util.Hashtable;
 import javax.annotation.Resource;
 
 import org.htmlunit.CookieManager;
+import org.htmlunit.FailingHttpStatusCodeException;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.ProxyConfig;
@@ -51,322 +53,285 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 
 	@Resource
 	private HanseaticSynchronizeBackend backend = null;
-	
+
 	@Override
 	protected SynchronizeBackend getBackend() { return backend; }
 
 	@Override
-	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort)
+	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
-		try 
+		log(Level.DEBUG, "besorge Basic-Credentials");
+		var response = doRequest("https://meine.hanseaticbank.de/de/register/sign-in", HttpMethod.GET, null, null, null);
+		var textContent = response.getContent().replace("\n", "").replace("\r", "");
+		var basicAuth = textContent.replaceAll(".*BASIC_AUTH:\"Basic ([^\"]+)\".*", "$1");
+		var baseUrl = textContent.replaceAll(".*NORTHLAYER_BASE_URL:\"([^\"]+)\".*", "$1");
+		log(Level.DEBUG, "Basic-Auth-Token ist " + basicAuth + ", BaseUrl: " + baseUrl);
+		permanentHeaders.clear();
+		permanentHeaders.add(new KeyValue<>("authorization", "Basic " + basicAuth));
+
+		var request = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
+		if (request.getHttpStatus() != 200)
 		{
-			log(Level.DEBUG, "besorge Basic-Credentials");
-			var response = doRequest("https://meine.hanseaticbank.de/de/register/sign-in", HttpMethod.GET, null, null, null);
-			var textContent = response.getContent().replace("\n", "").replace("\r", "");
-			var basicAuth = textContent.replaceAll(".*BASIC_AUTH:\"Basic ([^\"]+)\".*", "$1");
-			var baseUrl = textContent.replaceAll(".*NORTHLAYER_BASE_URL:\"([^\"]+)\".*", "$1");
-			log(Level.DEBUG, "Basic-Auth-Token ist " + basicAuth + ", BaseUrl: " + baseUrl);
-			permanentHeaders.clear();
-			permanentHeaders.add(new KeyValue<>("authorization", "Basic " + basicAuth));
+			log(Level.DEBUG, "Response: " + request.getContent());
+			throw new ApplicationException("Login fehlgeschlagen, Fehlercode " + request.getHttpStatus());
+		}
 
-			var request = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
-			if (request.getHttpStatus() != 200)
-			{
-				log(Level.ERROR, "Login fehlgeschlagen, Fehlercode " + request.getHttpStatus());
-				log(Level.DEBUG, "Response: " + request.getContent());
-				monitor.setPercentComplete(100);
-				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-				return false;
-			}
-			
-			JSONObject json = request.getJSONObject();
-			String token = json.optString("access_token");
-			if (token == null || token.isBlank())
-			{
-				log(Level.ERROR, "Login fehlgeschlagen, kein AccessToken");
-				log(Level.DEBUG, "Response: " + request.getContent());
-				monitor.setPercentComplete(100);
-				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-				return false;
-			}
+		JSONObject json = request.getJSONObject();
+		String token = json.optString("access_token");
+		if (token == null || token.isBlank())
+		{
+			log(Level.DEBUG, "Response: " + request.getContent());
+			throw new ApplicationException("Login fehlgeschlagen, kein AccessToken");
+		}
 
-			var tokenType = json.optString("token_type");
-			if (tokenType == null)
-			{
-				tokenType ="Bearer";
-			}
-			permanentHeaders.clear();
-			permanentHeaders.add(new KeyValue<>("authorization", tokenType + " " + token));
+		var tokenType = json.optString("token_type");
+		if (tokenType == null)
+		{
+			tokenType ="Bearer";
+		}
+		permanentHeaders.clear();
+		permanentHeaders.add(new KeyValue<>("authorization", tokenType + " " + token));
 
-			log(Level.INFO, "Login f\u00fcr " + user + " war erfolgreich");
-			monitor.setPercentComplete(5); 
+		log(Level.INFO, "Login f\u00FCr " + user + " war erfolgreich");
+		monitor.setPercentComplete(5); 
 
-			response = doRequest(baseUrl + "/pairingSecureApp/1.0/activateCreditCards", HttpMethod.PUT, null, null, null);
-			if (response.getHttpStatus() != 200)
-			{
-				log(Level.ERROR, "ActivateCreditCards fehlgeschlagen");
-				log(Level.DEBUG, "Response: " + request.getContent());
-				monitor.setPercentComplete(100);
-				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-				return true;
-			}
+		response = doRequest(baseUrl + "/pairingSecureApp/1.0/activateCreditCards", HttpMethod.PUT, null, null, null);
+		if (response.getHttpStatus() != 200)
+		{
+			log(Level.DEBUG, "Response: " + request.getContent());
+			throw new ApplicationException("ActivateCreditCards fehlgeschlagen");
+		}
 
-			response = doRequest(baseUrl + "/customerportal/1.0/accounts?skipCache=false", HttpMethod.GET, null, null, null);
-			if (response.getHttpStatus() != 200)
+		response = doRequest(baseUrl + "/customerportal/1.0/accounts?skipCache=false", HttpMethod.GET, null, null, null);
+		if (response.getHttpStatus() != 200)
+		{
+			log(Level.DEBUG, "Response: " + request.getContent());
+			throw new ApplicationException("Accountabfrage fehlgeschlagen");
+		}
+		Boolean found = false;
+		var accountsArray = response.getJSONArray();
+		Double saldo = konto.getSaldo();
+		for (var obj : accountsArray) 
+		{
+			JSONObject account = (JSONObject)obj;
+			if (user.equals(account.optString("customerNumber")) && konto.getKontonummer().equals(account.optString("accountNumber")))
 			{
-				log(Level.ERROR, "Accountabfrage fehlgeschlagen");
-				log(Level.DEBUG, "Response: " + request.getContent());
-				monitor.setPercentComplete(100);
-				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-				return true;
-			}
-			Boolean found = false;
-			var accountsArray = new JSONArray(response.getContent());
-			Double saldo = konto.getSaldo();
-			for (var obj : accountsArray) 
-			{
-				JSONObject account = (JSONObject)obj;
-				if (user.equals(account.optString("customerNumber")) && konto.getKontonummer().equals(account.optString("accountNumber")))
+				saldo = account.optDouble("saldo");
+				found = true;
+
+				if (fetchSaldo)
 				{
-					saldo = account.optDouble("saldo");
-					found = true;
-					
-					if (fetchSaldo)
-					{
-						konto.setSaldo(saldo);
-						konto.setSaldoAvailable(account.optDouble("availableAmount"));
-						konto.store();
-						Application.getMessagingFactory().sendMessage(new SaldoMessage(konto));
-					}
-					break;
+					konto.setSaldo(saldo);
+					konto.setSaldoAvailable(account.optDouble("availableAmount"));
+					konto.store();
+					Application.getMessagingFactory().sendMessage(new SaldoMessage(konto));
 				}
-			};
-
-			if (!found)
-			{
-				log(Level.ERROR, "Konto nicht gefunden");
-				log(Level.DEBUG, "Response: " + request.getContent());
-				monitor.setPercentComplete(100);
-				monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-				return true;
+				break;
 			}
-			monitor.setPercentComplete(10);
+		};
 
-			if (fetchUmsatz)
+		if (!found)
+		{
+			log(Level.DEBUG, "Response: " + request.getContent());
+			throw new ApplicationException("Konto nicht gefunden");
+		}
+		monitor.setPercentComplete(10);
+
+		if (fetchUmsatz)
+		{
+			var arbeitsSaldo = saldo;
+			var gotDuplicate = false;
+			var more = false;
+			var moreWithSCA = false;
+			var scaDone = false;
+			var pageNo = 0;
+			var neueUmsaetze = new ArrayList<Umsatz>();
+			var duplikate = new ArrayList<Umsatz>();
+			var dateFormat = new SimpleDateFormat("dd.MM.yyyy");
+			do
 			{
-				var arbeitsSaldo = saldo;
-				var gotDuplicate = false;
-				var more = false;
-				var moreWithSCA = false;
-				var scaDone = false;
-				var pageNo = 0;
-				var neueUmsaetze = new ArrayList<Umsatz>();
-				var duplikate = new ArrayList<Umsatz>();
-				var dateFormat = new SimpleDateFormat("dd.MM.yyyy");
-				do
+				pageNo++;
+
+				response = doRequest(baseUrl + "/transaction/1.0/transactionsEnriched/" + konto.getKontonummer() + "?page=" + pageNo + "&withReservations=true&withEnrichments=true", HttpMethod.GET, null, null, null);
+				if (response.getHttpStatus() != 200)
 				{
-					pageNo++;
+					log(Level.DEBUG, "Response: " + request.getContent());
+					throw new ApplicationException("Umsatzabruf fehlgeschlagen");
+				}
+				json = response.getJSONObject();
+				JSONArray transactionsArray = json.optJSONArray("transactions", new JSONArray());
+				more = json.optBoolean("more", false);
+				moreWithSCA = json.optBoolean("moreWithSCA", false);
 
-					response = doRequest(baseUrl + "/transaction/1.0/transactionsEnriched/" + konto.getKontonummer() + "?page=" + pageNo + "&withReservations=true&withEnrichments=true", HttpMethod.GET, null, null, null);
-					if (response.getHttpStatus() != 200)
+				log(Level.INFO, "lese Seite "+pageNo);
+				monitor.setPercentComplete(monitor.getPercentComplete() + 1);
+
+				for (var obj : transactionsArray)
+				{
+					var transaction = (JSONObject)obj;
+
+					var betrag = transaction.getDouble("amount");
+					var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
+					newUmsatz.setKonto(konto);
+					newUmsatz.setBetrag(betrag);
+					newUmsatz.setDatum(dateFormat.parse(transaction.getString("transactionDate")));
+					newUmsatz.setGegenkontoBLZ(transaction.optString("recipientBic"));
+					newUmsatz.setGegenkontoName(transaction.optString("recipientName"));
+					newUmsatz.setGegenkontoNummer(transaction.optString("recipientIban"));
+					newUmsatz.setValuta(dateFormat.parse(transaction.getString("date") + " 00:00"));
+					newUmsatz.setZweck(transaction.optString("description"));
+					newUmsatz.setArt(transaction.optString("creditDebitKey"));
+
+					ArrayList<String> details = new ArrayList<String>();
+
+					var website = transaction.getJSONObject("merchantData").getString("website");
+					if (website != null && !website.isBlank()) details.add("Web: " + website);
+					var transactionTime = transaction.optString("transactionTime");
+					if (transactionTime != null && !transactionTime.isBlank()) details.add("Zeit: " + transactionTime);
+					var conversionRate = transaction.optString("conversionRate");
+					if (conversionRate != null && !conversionRate.isBlank()) details.add("Wechselkurs: " + conversionRate);
+
+					newUmsatz.setCreditorId(transaction.optString("creditorID"));
+					newUmsatz.setMandateId(transaction.optString("mandateReference"));
+					newUmsatz.setCustomerRef(transaction.optString("transactionId"));
+
+					for (int j = 0; j < details.size(); j++)
 					{
-						log(Level.ERROR, "Umsatzabruf fehlgeschlagen");
-						log(Level.DEBUG, "Response: " + request.getContent());
-						monitor.setPercentComplete(100);
-						monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-						return true;
+						if (details.get(j).length() > 35) 
+						{
+							details.add(j + 1, details.get(j).substring(35));
+							details.set(j, details.get(j).substring(0,35));
+						}
 					}
-					json = response.getJSONObject();
-					JSONArray transactionsArray = json.optJSONArray("transactions", new JSONArray());
-					more = json.optBoolean("more", false);
-					moreWithSCA = json.optBoolean("moreWithSCA", false);
-
-					log(Level.INFO, "lese Seite "+pageNo);
-					monitor.setPercentComplete(monitor.getPercentComplete() + 1);
-
-					for (var obj : transactionsArray)
+					newUmsatz.setWeitereVerwendungszwecke(details.toArray(new String[0]));
+					if (transaction.optBoolean("booked", true) == false)
 					{
-						var transaction = (JSONObject)obj;
+						newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
+					}
+					else 
+					{
+						newUmsatz.setSaldo(arbeitsSaldo); // Zwischensaldo
+						arbeitsSaldo -= betrag;
+					}
 
-						var betrag = transaction.getDouble("amount");
-						var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
-						newUmsatz.setKonto(konto);
-						newUmsatz.setBetrag(betrag);
-						newUmsatz.setDatum(dateFormat.parse(transaction.getString("transactionDate")));
-						newUmsatz.setGegenkontoBLZ(transaction.optString("recipientBic"));
-						newUmsatz.setGegenkontoName(transaction.optString("recipientName"));
-						newUmsatz.setGegenkontoNummer(transaction.optString("recipientIban"));
-						newUmsatz.setValuta(dateFormat.parse(transaction.getString("date") + " 00:00"));
-						newUmsatz.setZweck(transaction.optString("description"));
-						newUmsatz.setArt(transaction.optString("creditDebitKey"));
-
-						ArrayList<String> details = new ArrayList<String>();
-
-						var website = transaction.getJSONObject("merchantData").getString("website");
-						if (website != null && !website.isBlank()) details.add("Web: " + website);
-						var transactionTime = transaction.optString("transactionTime");
-						if (transactionTime != null && !transactionTime.isBlank()) details.add("Zeit: " + transactionTime);
-						var conversionRate = transaction.optString("conversionRate");
-						if (conversionRate != null && !conversionRate.isBlank()) details.add("Wechselkurs: " + conversionRate);
-
-						newUmsatz.setCreditorId(transaction.optString("creditorID"));
-						newUmsatz.setMandateId(transaction.optString("mandateReference"));
-						newUmsatz.setCustomerRef(transaction.optString("transactionId"));
-
-						for (int j = 0; j < details.size(); j++)
+					var duplicate = getDuplicateByCompare(newUmsatz); 
+					if (duplicate != null)
+					{		                		
+						gotDuplicate = true;
+						if (duplicate.hasFlag(Umsatz.FLAG_NOTBOOKED))
 						{
-							if (details.get(j).length() > 35) 
-							{
-								details.add(j + 1, details.get(j).substring(35));
-								details.set(j, details.get(j).substring(0,35));
-							}
+							duplicate.setFlags(newUmsatz.getFlags());
+							duplicate.setSaldo(newUmsatz.getSaldo());
+							duplicate.setWeitereVerwendungszwecke(newUmsatz.getWeitereVerwendungszwecke());
+
+							duplicate.setGegenkontoBLZ(newUmsatz.getGegenkontoBLZ());
+							duplicate.setGegenkontoName(newUmsatz.getGegenkontoName());
+							duplicate.setGegenkontoNummer(newUmsatz.getGegenkontoNummer());
+							duplicate.setValuta(newUmsatz.getValuta());
+							duplicate.setArt(newUmsatz.getArt());
+							duplicate.setCreditorId(newUmsatz.getCreditorId());
+							duplicate.setMandateId(newUmsatz.getMandateId());
+							duplicate.setCustomerRef(newUmsatz.getCustomerRef());
+							duplicate.store();
+							duplikate.add(duplicate);
+							Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(duplicate));
 						}
-						newUmsatz.setWeitereVerwendungszwecke(details.toArray(new String[0]));
-						if (transaction.optBoolean("booked", true) == false)
+					}
+					else
+					{
+						neueUmsaetze.add(newUmsatz);
+					}
+				}
+
+				if (!gotDuplicate && !more && moreWithSCA && !scaDone)
+				{
+					log(Level.INFO, "Ben\u00f6tige zweiten Faktor f\u00FCr weitere Ums\u00e4tze...");
+
+					String status = null;
+					var resultCode = 0;
+
+					do 
+					{
+						response = doRequest(baseUrl + "/scaBroker/1.0/session", HttpMethod.POST, null, "application/json", "{\"initiator\":\"ton-sca-fe\",\"lang\":\"de\",\"session\":\"" + token + "\"}");
+						if (response.getHttpStatus() != 200)
 						{
-							newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
+							log(Level.DEBUG, "Response: " + request.getContent());
+							throw new ApplicationException("2FA-Abruf fehlgeschlagen");
 						}
-						else 
+						json = response.getJSONObject();	    	                
+						var type = json.optString("scaType", "Unbekannt");
+						var uniqueId = json.optString("scaUniqueId");
+
+						var requestText = "Bitte geben Sie die TAN ein, das sie per " + type + " erhalten haben.";
+						if (status != null)
 						{
-							newUmsatz.setSaldo(arbeitsSaldo); // Zwischensaldo
-							arbeitsSaldo -= betrag;
+							requestText += "\nDer letzte Code wurde nicht akzeptiert, Status " + resultCode + " / " + status;
 						}
 
-						var duplicate = getDuplicateByCompare(newUmsatz); 
-						if (duplicate != null)
-						{		                		
-							gotDuplicate = true;
-							if (duplicate.hasFlag(Umsatz.FLAG_NOTBOOKED))
-							{
-								duplicate.setFlags(newUmsatz.getFlags());
-								duplicate.setSaldo(newUmsatz.getSaldo());
-								duplicate.setWeitereVerwendungszwecke(newUmsatz.getWeitereVerwendungszwecke());
-
-								duplicate.setGegenkontoBLZ(newUmsatz.getGegenkontoBLZ());
-								duplicate.setGegenkontoName(newUmsatz.getGegenkontoName());
-								duplicate.setGegenkontoNummer(newUmsatz.getGegenkontoNummer());
-								duplicate.setValuta(newUmsatz.getValuta());
-								duplicate.setArt(newUmsatz.getArt());
-								duplicate.setCreditorId(newUmsatz.getCreditorId());
-								duplicate.setMandateId(newUmsatz.getMandateId());
-								duplicate.setCustomerRef(newUmsatz.getCustomerRef());
-								duplicate.store();
-								duplikate.add(duplicate);
-								Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(duplicate));
-							}
+						var sca = Application.getCallback().askUser(requestText, "TAN:");
+						if (sca == null || sca.isBlank())
+						{
+							more = false;
+							moreWithSCA = false;
+							log(Level.WARN, "TAN-Eingabe abgebrochen");
+							break;
 						}
 						else
 						{
-							neueUmsaetze.add(newUmsatz);
-						}
-					}
-
-					if (!gotDuplicate && !more && moreWithSCA && !scaDone)
-					{
-						log(Level.INFO, "Benötige zweiten Faktor für weitere Umsätze...");
-
-						String status = null;
-						var resultCode = 0;
-
-						do 
-						{
-							response = doRequest(baseUrl + "/scaBroker/1.0/session", HttpMethod.POST, null, "application/json", "{\"initiator\":\"ton-sca-fe\",\"lang\":\"de\",\"session\":\"" + token + "\"}");
+							response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.PUT, null, "application/json", "{\"otp\":\"" + sca + "\"}");
 							if (response.getHttpStatus() != 200)
 							{
-								log(Level.ERROR, "2FA-Abruf fehlgeschlagen");
 								log(Level.DEBUG, "Response: " + request.getContent());
-								monitor.setPercentComplete(100);
-								monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-								return true;
+								throw new ApplicationException("2FA-Validierung fehlgeschlagen");
 							}
-							json = response.getJSONObject();	    	                
-							var type = json.optString("scaType", "Unbekannt");
-							var uniqueId = json.optString("scaUniqueId");
+							json = response.getJSONObject();
+							status = json.optString("status");
+							resultCode = json.optInt("resultCode");
 
-							var requestText = "Bitte geben Sie die TAN ein, das sie per " + type + " erhalten haben.";
-							if (status != null)
+							if (!"complete".equals(status) || resultCode != 200)
 							{
-								requestText += "\nDer letzte Code wurde nicht akzeptiert, Status " + resultCode + " / " + status;
-							}
-
-		                	var sca = Application.getCallback().askUser(requestText, "TAN:");
-							if (sca == null || sca.isBlank())
-							{
-								more = false;
-								moreWithSCA = false;
-								log(Level.WARN, "TAN-Eingabe abgebrochen");
-								break;
+								log(Level.DEBUG, "Response: " + request.getContent());
+								throw new ApplicationException("2FA-Validierung fehlgeschlagen, Status = " + status + ", Result = " + resultCode);
 							}
 							else
 							{
-								response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.PUT, null, "application/json", "{\"otp\":\"" + sca + "\"}");
-								if (response.getHttpStatus() != 200)
-								{
-									log(Level.ERROR, "2FA-Validierung fehlgeschlagen");
-									log(Level.DEBUG, "Response: " + request.getContent());
-									monitor.setPercentComplete(100);
-									monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-									return true;
-								}
-								json = response.getJSONObject();
-								status = json.optString("status");
-								resultCode = json.optInt("resultCode");
-
-								if (!"complete".equals(status) || resultCode != 200)
-								{
-									log(Level.ERROR, "2FA-Validierung fehlgeschlagen, Status = " + status + ", Result = " + resultCode);
-									log(Level.DEBUG, "Response: " + request.getContent());
-									monitor.setPercentComplete(100);
-									monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-									return true;
-								}
-								else
-								{
-									scaDone = true;
-									neueUmsaetze.clear();
-									arbeitsSaldo = saldo;
-									pageNo = 0;
-									log(Level.INFO, "Starte Umsatzabfrage neu nach Eingabe zweiter Faktor");
-									break;
-								}
+								scaDone = true;
+								neueUmsaetze.clear();
+								arbeitsSaldo = saldo;
+								pageNo = 0;
+								log(Level.INFO, "Starte Umsatzabfrage neu nach Eingabe zweiter Faktor");
+								break;
 							}
 						}
-						while (true);
-					}	                
-				} while (!gotDuplicate && (more || moreWithSCA));
+					}
+					while (true);
+				}	                
+			} while (!gotDuplicate && (more || moreWithSCA));
 
-				monitor.setPercentComplete(75); 
-				log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");
+			monitor.setPercentComplete(75); 
+			log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");
 
-				reverseImport(neueUmsaetze);
-				
-				log(Level.INFO, "Import erfolgreich. Prüfe Reservierungen ...");
-				monitor.setPercentComplete(95); 
+			reverseImport(neueUmsaetze);
 
-				umsaetze.begin();
-				while (umsaetze.hasNext())
+			log(Level.INFO, "Import erfolgreich. Pr\u00FCfe Reservierungen ...");
+			monitor.setPercentComplete(95); 
+
+			umsaetze.begin();
+			while (umsaetze.hasNext())
+			{
+				Umsatz umsatz = umsaetze.next();
+				if (umsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
 				{
-					Umsatz umsatz = umsaetze.next();
-					if (umsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
+					if (!duplikate.contains(umsatz))
 					{
-						if (!duplikate.contains(umsatz))
-						{
-							var id = umsatz.getID();
-							umsatz.delete();
-							Application.getMessagingFactory().sendMessage(new ObjectDeletedMessage(umsatz, id));
-						}
+						var id = umsatz.getID();
+						umsatz.delete();
+						Application.getMessagingFactory().sendMessage(new ObjectDeletedMessage(umsatz, id));
 					}
 				}
 			}
-		} 
-		catch (Exception ex) 
-		{
-			log(Level.ERROR, "Unbekannter Fehler " + ex.toString());
-			monitor.setPercentComplete(100);
-			monitor.setStatus(ProgressMonitor.STATUS_ERROR);
-			return false;
 		}
-		
+
 		return true;
 	}
 }
