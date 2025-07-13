@@ -42,8 +42,6 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 	protected WebClient webClient;
 	protected List<KeyValue<String, String>> permanentHeaders = new ArrayList<KeyValue<String, String>>();
 
-	protected abstract String getVersion();
-
 	protected abstract SynchronizeBackend getBackend();
 	
 	@Override
@@ -55,7 +53,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		try 
 		{
 			monitor.setPercentComplete(0);
-			log(Level.INFO, "Version " + getVersion() + "." + Version.BUILD + " wurde gestartet f\u00FCr " + konto.getLongName() +"...");
+			log(Level.INFO, "Version " + Version.VERSION + "." + Version.BUILD + " wurde gestartet f\u00FCr " + konto.getLongName() +"...");
 			monitor.setPercentComplete(0);
 	
 			SynchronizeOptions options = new SynchronizeOptions(konto);

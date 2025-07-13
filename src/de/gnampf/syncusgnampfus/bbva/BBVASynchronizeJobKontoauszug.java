@@ -44,9 +44,6 @@ import de.willuhn.util.ProgressMonitor;
 
 public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {
-	@Override
-	protected String getVersion() { return "0.1"; }
-
 	@Resource
 	private BBVASynchronizeBackend backend = null;
 

@@ -52,9 +52,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	private static HashMap<String, Boolean> needLogin = new HashMap<>();;
 	private static HashMap<String, String> accountToken = new HashMap<>();
 
-	@Override
-	protected String getVersion() { return "0.1"; }
-
 	static  
 	{
 		keepAliveTimer.schedule(new TimerTask() {
