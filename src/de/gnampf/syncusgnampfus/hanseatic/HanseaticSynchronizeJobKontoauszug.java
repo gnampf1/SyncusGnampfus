@@ -159,7 +159,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 					throw new ApplicationException("Umsatzabruf fehlgeschlagen");
 				}
 				json = response.getJSONObject();
-				JSONArray transactionsArray = json.optJSONArray("transactions", new JSONArray());
+				JSONArray transactionsArray = json.optJSONArray("transactions");
 				more = json.optBoolean("more", false);
 				moreWithSCA = json.optBoolean("moreWithSCA", false);
 
