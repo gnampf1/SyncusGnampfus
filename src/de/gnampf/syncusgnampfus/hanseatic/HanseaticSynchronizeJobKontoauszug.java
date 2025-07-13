@@ -48,9 +48,6 @@ import de.willuhn.util.ProgressMonitor;
 
 public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {
-	@Override
-	protected String getVersion() { return "0.1"; }
-
 	@Resource
 	private HanseaticSynchronizeBackend backend = null;
 
