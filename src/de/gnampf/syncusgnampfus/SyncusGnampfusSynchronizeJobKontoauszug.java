@@ -167,7 +167,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		finally
 		{
 			monitor.log("******************************************************************************************************************\n\n\n");
-			monitor.addPercentComplete(100);
+			monitor.addPercentComplete(99);
 			monitor = null;
 		}
 	}
@@ -269,7 +269,12 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		{
 			Umsatz buchung2 = umsaetze.next();
 
-			if (buchung2.getTransactionId().equals(buchung.getTransactionId()))
+			var tID = buchung2.getTransactionId(); 
+			if (tID == null)
+			{
+				return getDuplicateByCompare(buchung);
+			}
+			else if (buchung2.getTransactionId().equals(buchung.getTransactionId()))
 			{
 				return buchung2;
 			}

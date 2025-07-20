@@ -80,6 +80,86 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	@Override
 	protected SynchronizeBackend getBackend() { return backend; }
 
+	private void GetCorrelationId(boolean headless, String user, String passwort) throws Exception 
+	{
+		ProxyServer proxyServer = new ProxyServer(0); //0 means random port
+		proxyServer.start(60000);
+		proxyServer.addRequestInterceptor(interceptor.get(user));
+		ProxyServer.setShouldKeepSslConnectionAlive(false);
+
+		try (Playwright playwright = Playwright.create()) 
+		{
+			var options1 = new BrowserType.LaunchOptions().setHeadless(headless).setProxy("http://localhost:" + proxyServer.getPort());
+			options1.args = new ArrayList<String>();
+			options1.args.add("--ignore-certificate-errors");
+			var browser = playwright.chromium().launch(options1);
+
+			var stealthContext = Stealth4j.newStealthContext(browser);
+			var pwPage = stealthContext.newPage();
+			var browserCookies = new ArrayList<com.microsoft.playwright.options.Cookie>();
+			var cookieManager = permanentWebClient.get(user).getCookieManager();
+			for (var c : cookieManager.getCookies())
+			{
+				try 
+				{
+					var bc = new com.microsoft.playwright.options.Cookie(c.getName(), c.getValue());
+					bc.setDomain(c.getDomain());
+					if (c.getExpires() != null)
+					{
+						bc.setExpires((double)(c.getExpires().getTime() / 1000));
+					}
+					bc.setHttpOnly(c.isHttpOnly());
+					bc.setPath(c.getPath());
+					if (c.getSameSite() != null)
+					{
+						bc.setSameSite(SameSiteAttribute.valueOf(c.getSameSite().toUpperCase()));
+					}
+					bc.setSecure(c.isSecure());
+					browserCookies.add(bc);
+				}
+				catch (Exception ex) { }
+			}
+			pwPage.context().addCookies(browserCookies);
+			pwPage.navigate("https://www.americanexpress.com/de-de/account/login?DestPage=https%3A%2F%2Fglobal.americanexpress.com%2Factivity%2Frecent%3Fappv5%3Dfalse");
+			var cookieBanner = pwPage.getByTestId("granular-banner-button-accept-all");
+			if (cookieBanner != null) 
+			{
+				cookieBanner.click();
+			}
+			pwPage.getByTestId("userid-input").fill("BlahIdBlah");
+			pwPage.getByTestId("password-input").fill("BlahWortBlah");
+			pwPage.getByTestId("submit-button").click();
+
+			int timeout = 600;
+			while (interceptor.get(user).Url == null && timeout > 0)
+			{
+				Thread.sleep(100);
+				timeout--;
+			}
+
+			if (timeout == 0)
+			{
+				interceptor.get(user).Url = null;
+				throw new ApplicationException("Timeout beim Ermitteln der CorrelationId");
+			}
+			
+			for (var c : pwPage.context().cookies())
+			{
+				cookieManager.addCookie(new Cookie(c.domain, c.name, c.value, c.path, new Date(c.expires.longValue()*1000), c.secure, c.httpOnly, c.sameSite.toString()));
+			}
+
+			pwPage.close();
+			browser.close();
+		}
+		finally 
+		{
+			proxyServer.stop();
+			proxyServer = null;
+		}
+
+		permanentHeaders.clear();
+		permanentHeaders.addAll(interceptor.get(user).Header);
+	}
 	/**
 	 * @see org.jameica.hibiscus.sync.example.ExampleSynchronizeJob#execute()
 	 */
@@ -95,89 +175,19 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		interceptor.putIfAbsent(user,  new AMEXRequestInterceptor());
 		if (interceptor.get(user).Url == null)
 		{
-			ProxyServer proxyServer = new ProxyServer(0); //0 means random port
-			proxyServer.start(60000);
-			proxyServer.addRequestInterceptor(interceptor.get(user));
-			ProxyServer.setShouldKeepSslConnectionAlive(false);
-
-			try (Playwright playwright = Playwright.create()) 
-			{
-				var options1 = new BrowserType.LaunchOptions().setHeadless(true).setProxy("http://localhost:" + proxyServer.getPort());
-				options1.args = new ArrayList<String>();
-				options1.args.add("--ignore-certificate-errors");
-				var browser = playwright.chromium().launch(options1);
-
-				var stealthContext = Stealth4j.newStealthContext(browser);
-				var pwPage = stealthContext.newPage();
-				var browserCookies = new ArrayList<com.microsoft.playwright.options.Cookie>();
-				var cookieManager = permanentWebClient.get(user).getCookieManager();
-				for (var c : cookieManager.getCookies())
-				{
-					try 
-					{
-						var bc = new com.microsoft.playwright.options.Cookie(c.getName(), c.getValue());
-						bc.setDomain(c.getDomain());
-						if (c.getExpires() != null)
-						{
-							bc.setExpires((double)(c.getExpires().getTime() / 1000));
-						}
-						bc.setHttpOnly(c.isHttpOnly());
-						bc.setPath(c.getPath());
-						if (c.getSameSite() != null)
-						{
-							bc.setSameSite(SameSiteAttribute.valueOf(c.getSameSite().toUpperCase()));
-						}
-						bc.setSecure(c.isSecure());
-						browserCookies.add(bc);
-					}
-					catch (Exception ex) { }
-				}
-				pwPage.context().addCookies(browserCookies);
-				pwPage.navigate("https://www.americanexpress.com/de-de/account/login?DestPage=https%3A%2F%2Fglobal.americanexpress.com%2Factivity%2Frecent%3Fappv5%3Dfalse");
-				var cookieBanner = pwPage.getByTestId("granular-banner-button-accept-all");
-				if (cookieBanner != null) 
-				{
-					cookieBanner.click();
-				}
-				pwPage.getByTestId("userid-input").fill("BlahIdBlah");
-				pwPage.getByTestId("password-input").fill("BlahWortBlah");
-				pwPage.getByTestId("submit-button").click();
-
-				int timeout = 600;
-				while (interceptor.get(user).Url == null && timeout > 0)
-				{
-					Thread.sleep(100);
-					timeout--;
-				}
-
-				if (timeout == 0)
-				{
-					interceptor.get(user).Url = null;
-					throw new ApplicationException("Timeout beim Ermitteln der CorrelationId");
-				}
-				
-				for (var c : pwPage.context().cookies())
-				{
-					cookieManager.addCookie(new Cookie(c.domain, c.name, c.value, c.path, new Date(c.expires.longValue()*1000), c.secure, c.httpOnly, c.sameSite.toString()));
-				}
-
-				pwPage.close();
-				browser.close();
-			}
-			finally 
-			{
-				proxyServer.stop();
-				proxyServer = null;
-			}
-
-			permanentHeaders.clear();
-			permanentHeaders.addAll(interceptor.get(user).Header);
+			GetCorrelationId(true, user, passwort);
 		}
 		monitor.setPercentComplete(5);
 
 		if (needLogin.get(user))
 		{
 			var response = doRequest(interceptor.get(user).Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.get(user).Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
+			if (response.getHttpStatus() == 403)
+			{
+				GetCorrelationId(false, user, passwort);					
+				response = doRequest(interceptor.get(user).Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.get(user).Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
+			}
+			
 			if (response.getHttpStatus() != 200)
 			{
 				interceptor.get(user).Url = null;
@@ -418,8 +428,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			monitor.setPercentComplete(95);
 			reverseImport(neueUmsaetze);
 		}
-
-		konto.setMeta(AMEXSynchronizeBackend.META_INHALTSVERGLEICH, "false");
 		return true;
 	}
 
@@ -459,15 +467,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 			}
 
-			Umsatz vorhandenerUmsatz;
-			if ("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_INHALTSVERGLEICH, "true")))
-			{
-				vorhandenerUmsatz = getDuplicateByCompare(newUmsatz);
-			}
-			else
-			{
-				vorhandenerUmsatz = getDuplicateById(newUmsatz);
-			}
+			Umsatz vorhandenerUmsatz = getDuplicateById(newUmsatz);
 			if (vorhandenerUmsatz != null) 
 			{
 				if (vorhandenerUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
