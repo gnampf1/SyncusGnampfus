@@ -11,7 +11,6 @@ import de.willuhn.jameica.hbci.rmi.Konto;
 @Lifecycle(Type.CONTEXT)
 public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 {
-	public final static String META_INHALTSVERGLEICH = "Inhalte statt TransaktionsId vergleichen (Daten\u00FCbernahme von Mashup)";
 	public final static String META_OTPTYPE = "OTP-Reihenfolge, E=EMAIL, S=SMS, A=App";
 
     @Override
@@ -36,14 +35,9 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			{
 				konto.setMeta(META_OTPTYPE, "ESA");
 			}
-			if (konto.getMeta(META_INHALTSVERGLEICH, null) == null)
-			{
-				konto.setMeta(META_INHALTSVERGLEICH, "true");
-			}
 
 			List<String> result = new ArrayList<String>();
 			result.add(META_OTPTYPE);
-			result.add(META_INHALTSVERGLEICH + "(true/false)");
 			return result;
 		} 
 		catch (RemoteException e) 

@@ -121,7 +121,10 @@
   <target depends="jar" name="zip" description="generates the zip files">
     <mkdir dir="${project.zipdir}/lib" />
     <copy todir="${project.zipdir}/lib">
-      <fileset dir="${lib.dir}" />
+      <fileset dir="${lib.dir}">
+        <exclude name="**/*ant*.jar" />
+        <exclude name="**/maven-resolver-ant-tasks*.jar" />
+      </fileset>
     </copy>
 
     <copy file="plugin.xml" todir="${project.zipdir}" />
@@ -188,13 +191,13 @@
     <checksum format="MD5SUM" algorithm="SHA" file="${project.release}/${define.zipfilename}" />
     <checksum format="MD5SUM" algorithm="SHA" file="${project.release}/${define.srcfilename}" />
     
-    <echo message="Creating PGP signatures" />
+<!--    <echo message="Creating PGP signatures" />
     <exec executable="gpg" failonerror="true" timeout="60000">
-      <arg line="-asb --use-agent ${project.release}/${define.zipfilename}" />
+      <arg line="-asb - -use-agent ${project.release}/${define.zipfilename}" />
     </exec>
     <exec executable="gpg" failonerror="true" timeout="60000">
-      <arg line="-asb --use-agent ${project.release}/${define.srcfilename}" />
-    </exec>
+      <arg line="-asb - -use-agent ${project.release}/${define.srcfilename}" />
+    </exec>-->
 
   	<!-- Die wird fuer jameica.update zum Pruefen des Downloads verwendet -->
     <echo message="Creating SHA1 signatures" />
