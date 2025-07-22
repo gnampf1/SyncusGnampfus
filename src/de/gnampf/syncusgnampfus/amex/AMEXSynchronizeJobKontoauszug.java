@@ -3,6 +3,7 @@ package de.gnampf.syncusgnampfus.amex;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.rmi.RemoteException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -13,8 +14,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.logging.LogManager;
 
 import javax.annotation.Resource;
+
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebClient;
 import org.htmlunit.util.Cookie;
@@ -22,8 +25,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Locator.WaitForOptions;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.SameSiteAttribute;
+import com.microsoft.playwright.options.WaitForSelectorState;
 
 import de.gnampf.syncusgnampfus.KeyValue;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJob;
@@ -37,10 +42,10 @@ import de.willuhn.jameica.hbci.rmi.Umsatz;
 import de.willuhn.jameica.hbci.synchronize.SynchronizeBackend;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.logging.Level;
+import de.willuhn.logging.Logger;
 import de.willuhn.util.ApplicationException;
 import de.willuhn.util.ProgressMonitor;
 import io.github.kihdev.playwright.stealth4j.Stealth4j;
-import website.magyar.mitm.proxy.ProxyServer;
 
 
 public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
@@ -82,20 +87,58 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 	private void GetCorrelationId(boolean headless, String user, String passwort) throws Exception 
 	{
-		ProxyServer proxyServer = new ProxyServer(0); //0 means random port
-		proxyServer.start(60000);
-		proxyServer.addRequestInterceptor(interceptor.get(user));
-		ProxyServer.setShouldKeepSslConnectionAlive(false);
-
+		log(Level.INFO, "Ermittlung CorrelationId gestartet");
 		try (Playwright playwright = Playwright.create()) 
 		{
-			var options1 = new BrowserType.LaunchOptions().setHeadless(headless).setProxy("http://localhost:" + proxyServer.getPort());
-			options1.args = new ArrayList<String>();
-			options1.args.add("--ignore-certificate-errors");
+			var options1 = new BrowserType.LaunchOptions().setSlowMo(100).setHeadless(headless);
 			var browser = playwright.chromium().launch(options1);
-
+			
 			var stealthContext = Stealth4j.newStealthContext(browser);
 			var pwPage = stealthContext.newPage();
+			pwPage.route("**/*", t -> 
+			{
+				var intereptor = interceptor.get(user);
+				if (t.request().url().endsWith("/myca/logon/emea/action/login") && "POST".equals(t.request().method()))
+				{
+					intereptor.log += "Triggered\n";
+					try 
+					{
+						intereptor.Header.clear();
+						t.request().headersArray().forEach(h -> 
+						{
+							var key = h.name.toLowerCase().trim();
+							if (!"content-type".equals(key) &&
+									!"host".equals(key) &&
+									!"cookie".equals(key))
+							{
+								intereptor.Header.add(new KeyValue<>(h.name, h.value));
+								if (h.name.equals("one-data-correlation-id"))
+								{
+									intereptor.Body = t.request().postData();
+									intereptor.Url = t.request().url();
+									intereptor.log += "Detected\n";
+								}
+							}
+						});
+						
+					}
+					catch (Exception e) 
+					{ 
+						intereptor.log +="EX: " + e+"\n";
+					}					
+				}
+				
+				if (intereptor.Url != null)
+				{
+					t.fulfill(new com.microsoft.playwright.Route.FulfillOptions()
+							  .setStatus(200)
+							  .setBody("accept"));
+				}
+				else 
+				{
+					t.resume(new com.microsoft.playwright.Route.ResumeOptions());
+				}
+			});
 			var browserCookies = new ArrayList<com.microsoft.playwright.options.Cookie>();
 			var cookieManager = permanentWebClient.get(user).getCookieManager();
 			for (var c : cookieManager.getCookies())
@@ -122,9 +165,17 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			pwPage.context().addCookies(browserCookies);
 			pwPage.navigate("https://www.americanexpress.com/de-de/account/login?DestPage=https%3A%2F%2Fglobal.americanexpress.com%2Factivity%2Frecent%3Fappv5%3Dfalse");
 			var cookieBanner = pwPage.getByTestId("granular-banner-button-accept-all");
-			if (cookieBanner != null) 
+			if (cookieBanner != null)
 			{
-				cookieBanner.click();
+				try 
+				{
+					cookieBanner.waitFor(new WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(5000));
+					if (cookieBanner.count() > 0) 
+					{
+						cookieBanner.click();
+					}
+				} 
+				catch (com.microsoft.playwright.TimeoutError e) { }
 			}
 			pwPage.getByTestId("userid-input").fill("BlahIdBlah");
 			pwPage.getByTestId("password-input").fill("BlahWortBlah");
@@ -133,10 +184,11 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			int timeout = 600;
 			while (interceptor.get(user).Url == null && timeout > 0)
 			{
+				pwPage.screenshot();
 				Thread.sleep(100);
 				timeout--;
 			}
-
+			
 			if (timeout == 0)
 			{
 				interceptor.get(user).Url = null;
@@ -151,10 +203,11 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			pwPage.close();
 			browser.close();
 		}
-		finally 
+		catch (Exception e)
 		{
-			proxyServer.stop();
-			proxyServer = null;
+			log(Level.ERROR, "Kann CorrelationId nicht ermitteln: "+e);
+			log(Level.ERROR, "Meldungen vom Interceptor: " + interceptor.get(user).log);
+			throw e;
 		}
 
 		permanentHeaders.clear();
@@ -172,25 +225,25 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		this.webClient = permanentWebClient.get(user);
 		ArrayList<Umsatz> neueUmsaetze = new ArrayList<Umsatz>();
 
-		interceptor.putIfAbsent(user,  new AMEXRequestInterceptor());
+		interceptor.putIfAbsent(user, new AMEXRequestInterceptor());
 		if (interceptor.get(user).Url == null)
 		{
 			GetCorrelationId(true, user, passwort);
 		}
 		monitor.setPercentComplete(5);
-
+		
 		if (needLogin.get(user))
 		{
 			var response = doRequest(interceptor.get(user).Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.get(user).Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
 			if (response.getHttpStatus() == 403)
 			{
+				interceptor.get(user).Url = null;
 				GetCorrelationId(false, user, passwort);					
 				response = doRequest(interceptor.get(user).Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.get(user).Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
 			}
 			
 			if (response.getHttpStatus() != 200)
 			{
-				interceptor.get(user).Url = null;
 				log(Level.DEBUG, "Response: " + response.getContent());
 				throw new ApplicationException("Login fehlgeschlagen, Status = " + response.getHttpStatus());
 			}
