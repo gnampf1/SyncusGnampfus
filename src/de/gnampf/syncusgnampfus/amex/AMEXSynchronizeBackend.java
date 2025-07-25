@@ -12,6 +12,10 @@ import de.willuhn.jameica.hbci.rmi.Konto;
 public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 {
 	public final static String META_OTPTYPE = "OTP-Reihenfolge, E=EMAIL, S=SMS, A=App";
+	public final static String META_NOTHEADLESS = "Browser beim Ermitteln CorrelationId anzeigen";
+	public final static String META_DEVICECOOKIES = "DeviceCookies";
+	public final static String META_ACCOUNTTOKEN = "AccountToken";
+	public final static String META_TRUST = "Als vertrauenswürdiges Gerät hinterlegen";
 
     @Override
     public String getName()
@@ -35,9 +39,19 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			{
 				konto.setMeta(META_OTPTYPE, "ESA");
 			}
+			if (konto.getMeta(META_NOTHEADLESS,  null) == null)
+			{
+				konto.setMeta(META_NOTHEADLESS, "false");
+			}
+			if (konto.getMeta(META_TRUST,  null) == null)
+			{
+				konto.setMeta(META_TRUST, "true");
+			}
 
 			List<String> result = new ArrayList<String>();
 			result.add(META_OTPTYPE);
+			result.add(META_TRUST + "(true/false)");
+			result.add(META_NOTHEADLESS + "(true/false)");
 			return result;
 		} 
 		catch (RemoteException e) 
