@@ -15,7 +15,7 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 	public final static String META_NOTHEADLESS = "Browser beim Ermitteln CorrelationId anzeigen";
 	public final static String META_DEVICECOOKIES = "DeviceCookies";
 	public final static String META_ACCOUNTTOKEN = "AccountToken";
-	public final static String META_TRUST = "Als vertrauenswürdiges Gerät hinterlegen";
+	public final static String META_TRUST = "Als vertrauensw\u00FCrdiges Ger\u00E4t hinterlegen";
 
     @Override
     public String getName()

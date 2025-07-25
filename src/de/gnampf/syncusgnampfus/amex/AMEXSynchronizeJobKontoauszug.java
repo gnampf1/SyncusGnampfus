@@ -487,7 +487,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			if (fetchUmsatz) 
 			{
-				response = doRequest("https://global.americanexpress.com/api/servicing/v1/financials/transactions?limit=10000&extended_details=merchant&start_date=2000-01-01&end_date=2099-12-31&status=pending", HttpMethod.GET, header, null, null);
+				response = doRequest("https://global.americanexpress.com/api/servicing/v1/financials/transactions?limit=1000&status=pending&extended_details=merchant", HttpMethod.GET, header, null, null);
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
@@ -576,7 +576,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			Umsatz vorhandenerUmsatz = getDuplicateById(newUmsatz);
 			if (vorhandenerUmsatz != null) 
 			{
-				if (vorhandenerUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
+				if (!pending && vorhandenerUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
 				{
 					vorhandenerUmsatz.setFlags(Umsatz.FLAG_NONE);
 					vorhandenerUmsatz.store();
