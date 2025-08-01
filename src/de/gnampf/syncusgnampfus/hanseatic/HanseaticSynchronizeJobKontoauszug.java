@@ -66,19 +66,36 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		permanentHeaders.clear();
 		permanentHeaders.add(new KeyValue<>("authorization", "Basic " + basicAuth));
 
-		var request = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
-		if (request.getHttpStatus() != 200)
+		response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
+		if (response.getHttpStatus() != 200)
 		{
-			log(Level.DEBUG, "Response: " + request.getContent());
-			throw new ApplicationException("Login fehlgeschlagen, Fehlercode " + request.getHttpStatus());
+			log(Level.DEBUG, "Response: " + response.getContent());
+			throw new ApplicationException("Login fehlgeschlagen, Fehlercode " + response.getHttpStatus());
 		}
 
-		JSONObject json = request.getJSONObject();
+		JSONObject json = response.getJSONObject();
 		String token = json.optString("access_token");
 		if (token == null || token.isBlank())
 		{
-			log(Level.DEBUG, "Response: " + request.getContent());
-			throw new ApplicationException("Login fehlgeschlagen, kein AccessToken");
+			log(Level.INFO, "Response: " + response.getContent());
+			
+			Application.getCallback().askUser("Probleme beim Login, benutzt du die App? Dann bitte da einmal Freigabe erteilen und danach hier bestätigen");
+			
+			response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
+			if (response.getHttpStatus() != 200)
+			{
+				log(Level.DEBUG, "Response: " + response.getContent());
+				throw new ApplicationException("Login fehlgeschlagen, Fehlercode " + response.getHttpStatus());
+			}
+
+			json = response.getJSONObject();
+			token = json.optString("access_token");
+			if (token == null || token.isBlank())
+			{
+				log(Level.INFO, "Response: " + response.getContent());
+
+				throw new ApplicationException("Login fehlgeschlagen, kein AccessToken");
+			}
 		}
 
 		var tokenType = json.optString("token_type");
@@ -95,14 +112,14 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		response = doRequest(baseUrl + "/pairingSecureApp/1.0/activateCreditCards", HttpMethod.PUT, null, null, null);
 		if (response.getHttpStatus() != 200)
 		{
-			log(Level.DEBUG, "Response: " + request.getContent());
+			log(Level.DEBUG, "Response: " + response.getContent());
 			throw new ApplicationException("ActivateCreditCards fehlgeschlagen");
 		}
 
 		response = doRequest(baseUrl + "/customerportal/1.0/accounts?skipCache=false", HttpMethod.GET, null, null, null);
 		if (response.getHttpStatus() != 200)
 		{
-			log(Level.DEBUG, "Response: " + request.getContent());
+			log(Level.DEBUG, "Response: " + response.getContent());
 			throw new ApplicationException("Accountabfrage fehlgeschlagen");
 		}
 		Boolean found = false;
@@ -129,7 +146,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 
 		if (!found)
 		{
-			log(Level.DEBUG, "Response: " + request.getContent());
+			log(Level.DEBUG, "Response: " + response.getContent());
 			throw new ApplicationException("Konto nicht gefunden");
 		}
 		monitor.setPercentComplete(10);
@@ -152,7 +169,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 				response = doRequest(baseUrl + "/transaction/1.0/transactionsEnriched/" + konto.getKontonummer() + "?page=" + pageNo + "&withReservations=true&withEnrichments=true", HttpMethod.GET, null, null, null);
 				if (response.getHttpStatus() != 200)
 				{
-					log(Level.DEBUG, "Response: " + request.getContent());
+					log(Level.DEBUG, "Response: " + response.getContent());
 					throw new ApplicationException("Umsatzabruf fehlgeschlagen");
 				}
 				json = response.getJSONObject();
@@ -252,7 +269,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 						response = doRequest(baseUrl + "/scaBroker/1.0/session", HttpMethod.POST, null, "application/json", "{\"initiator\":\"ton-sca-fe\",\"lang\":\"de\",\"session\":\"" + token + "\"}");
 						if (response.getHttpStatus() != 200)
 						{
-							log(Level.DEBUG, "Response: " + request.getContent());
+							log(Level.DEBUG, "Response: " + response.getContent());
 							throw new ApplicationException("2FA-Abruf fehlgeschlagen");
 						}
 						json = response.getJSONObject();	    	                
@@ -278,7 +295,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 							response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.PUT, null, "application/json", "{\"otp\":\"" + sca + "\"}");
 							if (response.getHttpStatus() != 200)
 							{
-								log(Level.DEBUG, "Response: " + request.getContent());
+								log(Level.DEBUG, "Response: " + response.getContent());
 								throw new ApplicationException("2FA-Validierung fehlgeschlagen");
 							}
 							json = response.getJSONObject();
@@ -287,7 +304,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 
 							if (!"complete".equals(status) || resultCode != 200)
 							{
-								log(Level.DEBUG, "Response: " + request.getContent());
+								log(Level.DEBUG, "Response: " + response.getContent());
 								throw new ApplicationException("2FA-Validierung fehlgeschlagen, Status = " + status + ", Result = " + resultCode);
 							}
 							else
