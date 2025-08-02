@@ -12,6 +12,7 @@ import java.util.Map;
 import javax.annotation.Resource;
 
 import org.htmlunit.HttpMethod;
+import org.htmlunit.html.HtmlPage;
 import org.htmlunit.util.Cookie;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -190,6 +191,21 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	@Override
 	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
+		if (konto.getUnterkonto() == null || konto.getUnterkonto().length() != 5)
+		{
+			var nr = konto.getUnterkonto().replaceAll(" ",  "");
+			if (nr.length() == 15)
+			{
+				konto.setUnterkonto(nr.substring(10));
+				konto.store();
+			}
+		}
+		
+		if (konto.getUnterkonto() == null || konto.getUnterkonto().length() != 5)
+		{
+			throw new ApplicationException("Bitte die letzten 5 Ziffern der Kreditkartennummer im Konto bei Unterkontonummer eintragen!");
+		}
+		
 		try 
 		{
 			ArrayList<Umsatz> neueUmsaetze = new ArrayList<Umsatz>();
@@ -436,14 +452,118 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			}
 			monitor.setPercentComplete(15);
 
-			if (konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, null) == null)
+			var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, null);
+			if (accountToken == null || accountToken.isBlank())
 			{
-				response = doRequest("https://global.americanexpress.com/activity/recent?appv5=false", HttpMethod.GET, null, null, null);
-				if (response.getHttpStatus() != 200)
+				log(Level.INFO, "Ermittle AccountToken (neue Variante)");
+				try 
 				{
-					log(Level.DEBUG, "Response: " + response.getContent());
-					throw new ApplicationException("Abfrage Konten fehlgeschlagen, Status = " + response.getHttpStatus());
+					response = doRequest("https://global.americanexpress.com/activity/recent?appv5=false", HttpMethod.GET, null, null, null, true);
+					if (response.getHttpStatus() != 200)
+					{
+						log(Level.DEBUG, "Response: " + response.getContent());
+						throw new ApplicationException("Abfrage Konten fehlgeschlagen, Status = " + response.getHttpStatus());
+					}
+					var initialState = ((HtmlPage)response.getPage()).executeJavaScript("window.__INITIAL_STATE__").getJavaScriptResult();
+					if (initialState != null)
+					{
+						var initialStateText = initialState.toString();
+						var initialArray = new JSONArray(initialStateText);
+						var a = initialArray.getJSONArray(1);
+						for (int i = 0; i < a.length(); i++)
+						{
+							if ("modules".equals(a.optString(i)))
+							{
+								var b = a.getJSONArray(i+1).getJSONArray(1);
+								for (i = 0; i < b.length(); i++)
+								{
+									if ("axp-myca-root".equals(b.optString(i)))
+									{
+										var c = b.getJSONArray(i+1).getJSONArray(1);
+										for (i = 0; i < c.length(); i++)
+										{
+											if ("products".equals(c.optString(i)))
+											{
+												var d = c.getJSONArray(i+1).getJSONArray(1);
+												for (i = 0; i < d.length(); i++)
+												{
+													if ("details".equals(d.optString(i)))
+													{
+														var e = d.getJSONArray(i+1).getJSONArray(1);
+														for (i = 0; i < e.length(); i++)
+														{
+															if ("types".equals(e.optString(i))) 
+															{
+																var f = e.getJSONArray(i+1).getJSONArray(1);
+																for (i = 0; i < f.length(); i++)
+																{
+																	if ("CARD_PRODUCT".equals(f.optString(i))) 
+																	{
+																		var g = f.getJSONArray(i+1);
+																		for (i = 0; i < g.length(); i++)
+																		{
+																			if ("productsList".equals(g.optString(i)))
+																			{
+																				var h = g.getJSONArray(i+1);
+																				for (i = 0; i < h.length(); i++)
+																				{
+																					var arr = h.optJSONArray(i); 
+																					if (arr != null)
+																					{
+																						var token = h.getString(i - 1);
+																						for (var j = 0; j < h.length(); j++)
+																						{
+																							if ("account".equals(arr.optString(j)))
+																							{
+																								var accArr = arr.getJSONArray(j+1);
+																								for (j = 0; j < accArr.length(); j++) 
+																								{
+																									if ("display_account_number".equals(accArr.optString(j)) && konto.getUnterkonto().equals(accArr.optString(j + 1)))
+																									{
+																										konto.setMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, token);
+																										accountToken = token;
+																										break;
+																									}
+																								}
+																								break;
+																							}
+																						}
+																					}
+																				}
+																				break;
+																			}
+																		}
+																		break;
+																	}
+																}
+																break;
+															}
+														}
+														break;
+													}
+												}
+												break;
+											}
+										}
+										break;
+									}
+								}
+								
+								break;
+							}
+						}
+					}
 				}
+				catch (Exception e)
+				{
+					log(Level.ERROR, "Ermittlung AccountToken mit neuer Variante fehlgeschlagen: " + e);
+					accountToken = null;
+				}
+			}
+
+			if (accountToken == null || accountToken.isBlank())
+			{
+				log(Level.INFO, "Ermittel AccountToken (alte Variante)");
 				response.getContent().lines().forEach(line -> 
 				{
 					if (line.contains("\\\"accountToken\\\"")) 
@@ -454,6 +574,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						} catch (RemoteException e) { }
 					}
 				});
+				accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, null);
 
 				if (konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, null) == null)
 				{
@@ -468,7 +589,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			monitor.setPercentComplete(20);
 
 			ArrayList<KeyValue<String, String>> header = new ArrayList<>();
-			header.add(new KeyValue<>("account_token", konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, "")));
+			header.add(new KeyValue<>("account_token", accountToken));
 
 			response = doRequest("https://global.americanexpress.com/api/servicing/v1/financials/balances", HttpMethod.GET, header, null, null);
 			if (response.getHttpStatus() != 200)
@@ -487,15 +608,21 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			if (fetchUmsatz) 
 			{
+				log(Level.INFO, "Hole Reservierungen");
 				response = doRequest("https://global.americanexpress.com/api/servicing/v1/financials/transactions?limit=1000&status=pending&extended_details=merchant", HttpMethod.GET, header, null, null);
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
 					throw new ApplicationException("Abruf unverbuchter Transaktionen fehlgeschlagen, Status = " + response.getHttpStatus());
 				}
-				processTransactions(konto, neueUmsaetze, umsaetze, response.getJSONObject().getJSONArray("transactions"), true, null);
+				var duplikate = processTransactions(konto, neueUmsaetze, umsaetze, response.getJSONObject().getJSONArray("transactions"), true, null);				
 				monitor.setPercentComplete(30);
+				
+				log(Level.INFO, "L\u00f6sche nicht mehr existierende Reservierungen");
+				deleteMissingUnbooked(duplikate);
+				monitor.setPercentComplete(35);
 
+				log(Level.INFO, "Hole Buchungsperioden");
 				response = doRequest("https://global.americanexpress.com/api/servicing/v1/financials/statement_periods", HttpMethod.GET, header, null, null);
 				if (response.getHttpStatus() != 200)
 				{
@@ -516,7 +643,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						log(Level.DEBUG, "Request: " + response.getContent());
 						throw new ApplicationException("Abruf Buchungen " +period.getString("statement_start_date") + " bis " + period.getString("statement_end_date") + " fehlgeschlagen, Status = " + response.getHttpStatus());
 					}
-					if (processTransactions(konto, neueUmsaetze, umsaetze, response.getJSONObject().getJSONArray("transactions"), false, saldo))
+					if (!processTransactions(konto, neueUmsaetze, umsaetze, response.getJSONObject().getJSONArray("transactions"), false, saldo).isEmpty())
 					{
 						break;
 					}
@@ -540,61 +667,67 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		public SaldoContainer(Double saldo) {value = saldo; }
 	}
 
-	private boolean processTransactions(Konto konto, ArrayList<Umsatz> neueUmsaetze, DBIterator<Umsatz> vorhandeneUmsaetze, JSONArray transactions, boolean pending, SaldoContainer saldo) throws RemoteException, ParseException, ApplicationException
+	private ArrayList<Umsatz> processTransactions(Konto konto, ArrayList<Umsatz> neueUmsaetze, DBIterator<Umsatz> vorhandeneUmsaetze, JSONArray transactions, boolean pending, SaldoContainer saldo) throws RemoteException, ParseException, ApplicationException
 	{
-		var duplicates = false;
+		var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, "");
+		var kontoNr = konto.getUnterkonto();
+		var duplikate = new ArrayList<Umsatz>();
+		
 		for (var transObj : transactions)
 		{
 			var transaction = (JSONObject)transObj;
-			var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
-			newUmsatz.setKonto(konto);
-			if (pending)
+			if (accountToken.equals(transaction.optString("account_token")) && kontoNr.equals(transaction.optString("display_account_number")))
 			{
-				newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
-			}
-			newUmsatz.setTransactionId(transaction.optString("identifier"));
-			newUmsatz.setZweck(transaction.optString("description").replaceAll(" +", " "));
-			newUmsatz.setDatum(dateFormat.parse(transaction.getString("charge_date")));
-			newUmsatz.setValuta(dateFormat.parse(transaction.getString("charge_date")));
-			newUmsatz.setBetrag(-transaction.optDouble("amount"));
-			newUmsatz.setCustomerRef(transaction.optString("reference_id"));
-			if (saldo != null)
-			{
-				newUmsatz.setSaldo(saldo.value);
-				saldo.value -= newUmsatz.getBetrag();
-			}
-			var extended = transaction.optJSONObject("extended_details");
-			if (extended != null)
-			{
-				var merchant = extended.optJSONArray("merchant");
-				if (merchant != null)
+				var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
+				newUmsatz.setKonto(konto);
+				if (pending)
 				{
-					newUmsatz.setGegenkontoName(extended.optString("display_name"));
+					newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
 				}
-			}
-
-			Umsatz vorhandenerUmsatz = getDuplicateById(newUmsatz);
-			if (vorhandenerUmsatz != null) 
-			{
-				if (!pending && vorhandenerUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
+				newUmsatz.setTransactionId(transaction.optString("identifier"));
+				newUmsatz.setZweck(transaction.optString("description").replaceAll(" +", " "));
+				newUmsatz.setDatum(dateFormat.parse(transaction.getString("charge_date")));
+				newUmsatz.setValuta(dateFormat.parse(transaction.getString("charge_date")));
+				newUmsatz.setBetrag(-transaction.optDouble("amount"));
+				newUmsatz.setCustomerRef(transaction.optString("reference_id"));
+				if (saldo != null)
 				{
-					vorhandenerUmsatz.setFlags(Umsatz.FLAG_NONE);
-					vorhandenerUmsatz.store();
-					Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
+					newUmsatz.setSaldo(saldo.value);
+					saldo.value -= newUmsatz.getBetrag();
 				}
-				if (vorhandenerUmsatz.getTransactionId() == null)
+				var extended = transaction.optJSONObject("extended_details");
+				if (extended != null)
 				{
-					vorhandenerUmsatz.setTransactionId(newUmsatz.getTransactionId());
-					vorhandenerUmsatz.store();
-					Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
+					var merchant = extended.optJSONArray("merchant");
+					if (merchant != null)
+					{
+						newUmsatz.setGegenkontoName(extended.optString("display_name"));
+					}
 				}
-				duplicates = true;
-			}
-			else
-			{
-				neueUmsaetze.add(newUmsatz);
+	
+				Umsatz vorhandenerUmsatz = getDuplicateById(newUmsatz);
+				if (vorhandenerUmsatz != null) 
+				{
+					if (!pending && vorhandenerUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
+					{
+						vorhandenerUmsatz.setFlags(Umsatz.FLAG_NONE);
+						vorhandenerUmsatz.store();
+						Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
+					}
+					if (vorhandenerUmsatz.getTransactionId() == null)
+					{
+						vorhandenerUmsatz.setTransactionId(newUmsatz.getTransactionId());
+						vorhandenerUmsatz.store();
+						Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
+					}
+					duplikate.add(vorhandenerUmsatz);
+				}
+				else
+				{
+					neueUmsaetze.add(newUmsatz);
+				}
 			}
 		}
-		return duplicates;
+		return duplikate;
 	}
 }
