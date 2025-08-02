@@ -52,6 +52,7 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			result.add(META_OTPTYPE);
 			result.add(META_TRUST + "(true/false)");
 			result.add(META_NOTHEADLESS + "(true/false)");
+			result.add(META_ACCOUNTTOKEN);
 			return result;
 		} 
 		catch (RemoteException e) 

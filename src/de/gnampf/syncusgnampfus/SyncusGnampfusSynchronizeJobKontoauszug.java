@@ -22,6 +22,7 @@ import org.htmlunit.WebRequest;
 import de.willuhn.datasource.rmi.DBIterator;
 import de.willuhn.jameica.hbci.SynchronizeOptions;
 import de.willuhn.jameica.hbci.messaging.ImportMessage;
+import de.willuhn.jameica.hbci.messaging.ObjectDeletedMessage;
 import de.willuhn.jameica.hbci.rmi.Konto;
 import de.willuhn.jameica.hbci.rmi.Umsatz;
 import de.willuhn.jameica.hbci.synchronize.SynchronizeBackend;
@@ -291,9 +292,30 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			Application.getMessagingFactory().sendMessage(new ImportMessage(umsatz));
 		}
 	}
+	
+	protected void deleteMissingUnbooked(List<Umsatz> stillExistingUnbooked) throws RemoteException, ApplicationException
+	{
+		umsaetze.begin();
+		while (umsaetze.hasNext())
+		{
+			Umsatz umsatz = umsaetze.next();
+			if (umsatz.hasFlag(Umsatz.FLAG_NOTBOOKED) && !stillExistingUnbooked.contains(umsatz))
+			{
+				var id = umsatz.getID();
+				umsatz.delete();
+				Application.getMessagingFactory().sendMessage(new ObjectDeletedMessage(umsatz, id));
+			}
+		}
+	}
 
 	protected WebResult doRequest(String url, HttpMethod method, List<KeyValue<String, String>> headers,
 			String contentType, String data) throws URISyntaxException, FailingHttpStatusCodeException, IOException, ApplicationException 
+	{
+		return doRequest(url, method, headers, contentType, data, false);
+	}
+	
+	protected WebResult doRequest(String url, HttpMethod method, List<KeyValue<String, String>> headers,
+			String contentType, String data, boolean javascriptEnabled) throws URISyntaxException, FailingHttpStatusCodeException, IOException, ApplicationException 
 	{
 		ArrayList<KeyValue<String, String>> mergedHeader = new ArrayList<>();
 		
@@ -309,11 +331,17 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			}
 		}
 
-		return doRequest(webClient, url, method, mergedHeader, contentType, data);
+		return doRequest(webClient, url, method, mergedHeader, contentType, data, javascriptEnabled);
 	}		
 
 	protected static WebResult doRequest(WebClient webClient, String url, HttpMethod method, List<KeyValue<String, String>> headers,
-			String contentType, String data) throws URISyntaxException, FailingHttpStatusCodeException, IOException, ApplicationException 
+			String contentType, String data) throws URISyntaxException, FailingHttpStatusCodeException, IOException, ApplicationException
+	{
+		return doRequest(webClient, url, method, headers, contentType, data, false);
+	}
+
+	protected static WebResult doRequest(WebClient webClient, String url, HttpMethod method, List<KeyValue<String, String>> headers,
+			String contentType, String data, boolean javascriptEnabled) throws URISyntaxException, FailingHttpStatusCodeException, IOException, ApplicationException 
 	{
 		WebRequest request = new WebRequest(new java.net.URI(url).toURL(), method);
 		request.setAdditionalHeaders(new Hashtable<String, String>());
@@ -338,6 +366,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			request.setRequestBody(data);
 		}
 
+		webClient.getOptions().setJavaScriptEnabled(javascriptEnabled);
 		Page page = webClient.getPage(request);
 		if (page == null) 
 		{
@@ -347,7 +376,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		{
 			var response = page.getWebResponse();
 			var text = response.getContentAsString(utf8);
-			return new WebResult(response.getStatusCode(), text, response.getResponseHeaders());
+			return new WebResult(response.getStatusCode(), text, response.getResponseHeaders(), page);
 		}
 	}
 }

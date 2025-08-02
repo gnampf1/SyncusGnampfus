@@ -330,20 +330,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			log(Level.INFO, "Import erfolgreich. Pr\u00FCfe Reservierungen ...");
 			monitor.setPercentComplete(95); 
 
-			umsaetze.begin();
-			while (umsaetze.hasNext())
-			{
-				Umsatz umsatz = umsaetze.next();
-				if (umsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
-				{
-					if (!duplikate.contains(umsatz))
-					{
-						var id = umsatz.getID();
-						umsatz.delete();
-						Application.getMessagingFactory().sendMessage(new ObjectDeletedMessage(umsatz, id));
-					}
-				}
-			}
+			deleteMissingUnbooked(duplikate);
 		}
 
 		return true;
