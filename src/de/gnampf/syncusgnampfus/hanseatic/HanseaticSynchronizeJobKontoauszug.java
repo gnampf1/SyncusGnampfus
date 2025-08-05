@@ -77,9 +77,42 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		String token = json.optString("access_token");
 		if (token == null || token.isBlank())
 		{
-			log(Level.INFO, "Response: " + response.getContent());
+			token = json.optString("id_token");
+			if (token == null || token.isBlank())
+			{
+				log(Level.INFO, "Response: " + response.getContent());
+				throw new ApplicationException("Weder ein Acess- noch ein ID-Token erhalten");
+			}
+
+			log(Level.INFO, "Anmeldung muss in der Hanseatic-App bestätigt werden!");
+
+			permanentHeaders.clear();
+			permanentHeaders.add(new KeyValue<>("authorization", "Bearer " + token));
+
+			token = token.substring(token.indexOf(".") + 1);
+			token = token.substring(0, token.lastIndexOf("."));
+			var js = new String(de.willuhn.util.Base64.decode(token));
+			JSONObject idt = new JSONObject(js);
+			var scaId = idt.optString("sca_id");
 			
-			Application.getCallback().askUser("Probleme beim Login, benutzt du die App? Dann bitte da einmal Freigabe erteilen und danach hier bestätigen");
+			while (true) 
+			{
+				response = doRequest(baseUrl + "/openScaBroker/1.0/customer/" +  URLEncoder.encode(user, "UTF-8") + "/status/" + scaId, HttpMethod.GET, null, null, null);
+				var status = response.getJSONObject().optString("status");
+				if ("complete".equals(status))
+				{
+					break;
+				}
+				else if ("open".equals(status) || "accepted".equals(status))
+				{
+					log(Level.INFO, "Status ist " + status);
+					Thread.sleep(5000);
+				}
+				else
+				{
+					throw new ApplicationException("Unbekannte Status " + status + ", Freigabe in der App verweigert?");
+				}
+			}
 			
 			response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
 			if (response.getHttpStatus() != 200)
