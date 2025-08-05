@@ -15,7 +15,7 @@ Entweder das Plugin als ZIP-File aus den Github-Releases in Hibiscus importieren
 Konten müssen von Hand angelegt werden, dafür unter **Konten** auf **Konto manuell anlegen** gehen. Keinen Haken bei **Offline-Konto** setzen!
 
 ### American Express
-hier muss nur die Kundenkennung mit dem Benutzernamen fürs Onlinebanking gefüllt und im Dropdown **Zugangsweg** *AMEX* ausgewählt werden. Die restlichen Felder können frei vergeben werden.<BR>
+hier muss nur die Kundenkennung mit dem Benutzernamen fürs Onlinebanking gefüllt, bei Unterkontonummer die letzten 5 Ziffern der Kreditkarte eingegeben werden (oder die ganze Kreditkartennummer) und im Dropdown **Zugangsweg** *AMEX* ausgewählt werden. Die restlichen Felder können frei vergeben werden.<BR>
 In den Synchronisationsoptionen des Kontos kann für die "TAN-Verfahren" eine Reihenfolge vergeben werden. Das erste gefundene Verfahren wird dann verwendet. Standard ist *ESA* für erst Email, dann SMS, dann App (ja, ich kann Banking-Apps nicht leiden!). Durch Umstellen der Buchstaben sind andere Prios möglich.<BR>
 In den Synchronisationsoptionen kann außerdem eingestellt werden, ob das Plugin sich als vertrauenswürdiges Gerät bei AMEX registriert. In dem Fall ist nicht bei jedem Umsatzabruf die Eingabe des zweiten Faktor nötig. Standard ist ja.
 
