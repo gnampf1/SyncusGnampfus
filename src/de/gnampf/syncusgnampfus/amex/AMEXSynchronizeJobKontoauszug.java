@@ -189,7 +189,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	 * @see org.jameica.hibiscus.sync.example.ExampleSynchronizeJob#execute()
 	 */
 	@Override
-	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
+	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
 		if (konto.getUnterkonto() == null || konto.getUnterkonto().length() != 5)
 		{
@@ -213,22 +213,11 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			addDeviceCookies(konto);
 			interceptors.putIfAbsent(user, new AMEXRequestInterceptor());
 			var interceptor = interceptors.get(user);
-			if (interceptors.get(user).Url == null)
-			{
-				GetCorrelationId(konto, user, passwort);
-				addDeviceCookies(konto);
-			}
+			GetCorrelationId(konto, user, passwort);
+			addDeviceCookies(konto);
 			monitor.setPercentComplete(5);
 
 			var response = doRequest(interceptor.Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
-			if (response.getHttpStatus() == 403)
-			{
-				interceptor.Url = null;
-				GetCorrelationId(konto, user, passwort);					
-				addDeviceCookies(konto);
-				response = doRequest(interceptor.Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
-			}
-
 			if (response.getHttpStatus() != 200)
 			{
 				log(Level.DEBUG, "Response: " + response.getContent());
@@ -643,7 +632,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						log(Level.DEBUG, "Request: " + response.getContent());
 						throw new ApplicationException("Abruf Buchungen " +period.getString("statement_start_date") + " bis " + period.getString("statement_end_date") + " fehlgeschlagen, Status = " + response.getHttpStatus());
 					}
-					if (!processTransactions(konto, neueUmsaetze, umsaetze, response.getJSONObject().getJSONArray("transactions"), false, saldo).isEmpty())
+					if (!forceAll && !processTransactions(konto, neueUmsaetze, umsaetze, response.getJSONObject().getJSONArray("transactions"), false, saldo).isEmpty())
 					{
 						break;
 					}

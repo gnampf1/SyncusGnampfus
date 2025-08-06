@@ -53,7 +53,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	 * @see org.jameica.hibiscus.sync.example.ExampleSynchronizeJob#execute()
 	 */
 	@Override
-	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
+	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
 		ArrayList<KeyValue<String, String>> headers = new ArrayList<>();
 		try 
@@ -292,7 +292,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 
 				page++;
-			} while (!duplikatGefunden.value && page < numPages);
+			} while ((forceAll || !duplikatGefunden.value) && page < numPages);
 
 			monitor.setPercentComplete(75); 
 			log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");

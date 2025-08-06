@@ -158,8 +158,15 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			}
 	
 			webClient = getWebClient(null);
-	
-			if (process(konto, fetchSaldo, fetchUmsatz, umsaetze, user, passwort))
+			
+			boolean forceAll = false;
+			if (konto.getSaldoDatum() == null)
+			{
+				forceAll = true;
+				log(Level.INFO, "Kein Saldodatum, forciere Abruf aller Ums\u00E4tze!");
+			}
+			
+			if (process(konto, fetchSaldo, fetchUmsatz, forceAll, umsaetze, user, passwort))
 			{
 				if (cachePins) { passwortHashtable.put(walletAlias, passwort); }
 				if (storePins) { wallet.set(walletAlias, passwort); }
@@ -226,7 +233,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		}
 	}
 
-	public abstract boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception;
+	public abstract boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception;
 
 	protected Umsatz getDuplicateByCompare(Umsatz buchung) throws RemoteException
 	{

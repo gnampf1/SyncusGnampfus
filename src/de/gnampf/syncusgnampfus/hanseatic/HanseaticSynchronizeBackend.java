@@ -7,7 +7,9 @@ import de.willuhn.annotation.Lifecycle.Type;
 @Lifecycle(Type.CONTEXT)
 public class HanseaticSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 {
-    @Override
+	public final static String META_DEVICETOKEN = "DeviceToken";
+
+	@Override
     public String getName()
     {
         return "HanseaticBank";
