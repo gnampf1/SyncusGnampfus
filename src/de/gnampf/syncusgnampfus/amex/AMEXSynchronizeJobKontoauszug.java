@@ -40,7 +40,6 @@ import io.github.kihdev.playwright.stealth4j.Stealth4j;
 
 public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {
-	private static HashMap<String, AMEXRequestInterceptor> interceptors = new HashMap<>();
 	private static SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
 
 	@Resource
@@ -49,10 +48,10 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	@Override
 	protected SynchronizeBackend getBackend() { return backend; }
 
-	private void GetCorrelationId(Konto konto, String user, String passwort) throws Exception 
+	private AMEXRequestInterceptor GetCorrelationId(Konto konto, String user, String passwort) throws Exception 
 	{
 		log(Level.INFO, "Ermittlung CorrelationId gestartet");
-		var interceptor = interceptors.get(user);
+		var interceptor = new AMEXRequestInterceptor();
 		try (Playwright playwright = Playwright.create()) 
 		{
 			var headless = "false".equals(konto.getMeta(AMEXSynchronizeBackend.META_NOTHEADLESS,  "false"));
@@ -155,6 +154,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 		permanentHeaders.clear();
 		permanentHeaders.addAll(interceptor.Header);
+		return interceptor;
 	}
 	
 	private void addDeviceCookies(Konto konto) throws RemoteException
@@ -211,9 +211,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			ArrayList<Umsatz> neueUmsaetze = new ArrayList<Umsatz>();
 
 			addDeviceCookies(konto);
-			interceptors.putIfAbsent(user, new AMEXRequestInterceptor());
-			var interceptor = interceptors.get(user);
-			GetCorrelationId(konto, user, passwort);
+			var interceptor = GetCorrelationId(konto, user, passwort);
 			addDeviceCookies(konto);
 			monitor.setPercentComplete(5);
 
