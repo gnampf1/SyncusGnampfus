@@ -384,7 +384,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 						}
 						else
 						{
-							log(Level.INFO, "Abruf \\u00E4lterer Ums\\u00E4tze muss in der App best\\u00E4tigt werden!");
+							log(Level.INFO, "Abruf \u00E4lterer Ums\u00E4tze muss in der App best\u00E4tigt werden!");
 						}
 
 						while (true)
