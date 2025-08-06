@@ -62,7 +62,29 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		var textContent = response.getContent().replace("\n", "").replace("\r", "");
 		var basicAuth = textContent.replaceAll(".*BASIC_AUTH:\"Basic ([^\"]+)\".*", "$1");
 		var baseUrl = textContent.replaceAll(".*NORTHLAYER_BASE_URL:\"([^\"]+)\".*", "$1");
-		log(Level.DEBUG, "Basic-Auth-Token ist " + basicAuth + ", BaseUrl: " + baseUrl);
+		var clientKey = textContent.replaceAll(".*NORTHLAYER_CLIENT_KEY:\"([^\"]+)\".*", "$1");
+		var clientSecret = textContent.replaceAll(".*NORTHLAYER_CLIENT_SECRET:\"([^\"]+)\".*", "$1");
+		log(Level.DEBUG, "Basic-Auth-Token = " + basicAuth + ", BaseUrl: " + baseUrl + ", ClientKey = " + clientKey + ", ClientSecret = " + clientSecret);
+
+		log(Level.INFO, "Hole allgemeines Token");
+		permanentHeaders.clear();
+		permanentHeaders.add(new KeyValue<>("authorization", "Bearer undefined"));
+
+		response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=client_credentials&client_id=" + clientKey + "&client_secret=" + clientSecret);
+		if (response.getHttpStatus() != 200 || response.getJSONObject() == null)
+		{
+			log(Level.DEBUG, "Response: " + response.getContent());
+			throw new ApplicationException("Login fehlgeschlagen, Fehlercode " + response.getHttpStatus());
+		}
+
+		JSONObject json = response.getJSONObject();
+		String genericToken = json.optString("access_token");
+		if (genericToken == null)
+		{
+			log(Level.DEBUG, "Response: " + response.getContent());
+			throw new ApplicationException("Kein allgemeines Token erhalten?");
+		}
+		
 		permanentHeaders.clear();
 		permanentHeaders.add(new KeyValue<>("authorization", "Basic " + basicAuth));
 
@@ -73,7 +95,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			throw new ApplicationException("Login fehlgeschlagen, Fehlercode " + response.getHttpStatus());
 		}
 
-		JSONObject json = response.getJSONObject();
+		 json = response.getJSONObject();
 		String token = json.optString("access_token");
 		if (token == null || token.isBlank())
 		{
@@ -87,7 +109,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			log(Level.INFO, "Anmeldung muss in der Hanseatic-App bestätigt werden!");
 
 			permanentHeaders.clear();
-			permanentHeaders.add(new KeyValue<>("authorization", "Bearer " + token));
+			permanentHeaders.add(new KeyValue<>("authorization", "Bearer " + genericToken));
 
 			token = token.substring(token.indexOf(".") + 1);
 			token = token.substring(0, token.lastIndexOf("."));
@@ -95,12 +117,18 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			JSONObject idt = new JSONObject(js);
 			var scaId = idt.optString("sca_id");
 			
+			String deviceToken = null;
 			while (true) 
 			{
 				response = doRequest(baseUrl + "/openScaBroker/1.0/customer/" +  URLEncoder.encode(user, "UTF-8") + "/status/" + scaId, HttpMethod.GET, null, null, null);
 				var status = response.getJSONObject().optString("status");
 				if ("complete".equals(status))
 				{
+					var resultData = response.getJSONObject().optJSONObject("resultData");
+					if (resultData != null)
+					{
+						deviceToken = resultData.optString("DEVICETOKEN");
+					}
 					break;
 				}
 				else if ("open".equals(status) || "accepted".equals(status))
@@ -114,6 +142,13 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 				}
 			}
 			
+			permanentHeaders.clear();
+			permanentHeaders.add(new KeyValue<>("authorization", "Basic " + basicAuth));
+			if (deviceToken != null)
+			{
+				permanentHeaders.add(new KeyValue<>("DEVICETOKEN", deviceToken));
+			}
+
 			response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
 			if (response.getHttpStatus() != 200)
 			{
