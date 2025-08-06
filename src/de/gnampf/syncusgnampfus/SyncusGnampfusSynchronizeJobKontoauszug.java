@@ -84,7 +84,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			log(Level.DEBUG, "es wird auf eine Proxy-Konfiguration gepr\u00FCft ...");
 			proxyConfig = null;
 	
-			log(Level.INFO, "Proxy Einstellungen setzten ...");
+			log(Level.INFO, "Proxy Einstellungen setzen ...");
 	
 			if (Application.getConfig().getUseSystemProxy())
 			{

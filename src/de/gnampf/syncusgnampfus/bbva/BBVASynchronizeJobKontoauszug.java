@@ -214,71 +214,82 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			{
 				response = doRequest(webClient, "https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=" + page, HttpMethod.POST, headers, "application/json", "{\"accountContracts\":[{\"contract\":{\"id\":\"" + contractId + "\"}}],\"customer\":{\"id\":\"" + personId + "\"},\"filter\":{\"dates\":{\"from\":\"2025-05-01T00:00:00.000Z\",\"to\":\"" + dateFormat.format(new Date()) + "\"},\"operationType\":[\"BOTH\"]},\"orderField\":\"DATE_FIELD\",\"orderType\":\"DESC_ORDER\",\"searchType\":\"SEARCH\"}");
 				json = response.getJSONObject();
-				numPages = json.optJSONObject("pagination").optInt("numPages");
-
-				json.optJSONArray("accountTransactions").forEach(t -> 
+				var pagination = json.optJSONObject("pagination");
+				if (pagination != null && pagination.has("numPages"))
 				{
-					var transaction = (JSONObject)t;
+					numPages = pagination.optInt("numPages");
+				}
+				else
+				{
+					log(Level.INFO, "Kein Pagination-Objekt oder keine Anzahl Seiten? Gehe von 1 aus");
+				}
 
-					try 
+				if (json.has("accountTransactions"))
+				{
+					json.getJSONArray("accountTransactions").forEach(t -> 
 					{
-						var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
-						newUmsatz.setKonto(konto);
-						newUmsatz.setArt(transaction.optJSONObject("concept").optString("name"));
-						newUmsatz.setBetrag(transaction.optJSONObject("amount").optDouble("amount"));
-						newUmsatz.setDatum(dateFormat.parse(transaction.optString("transactionDate")));
-						newUmsatz.setSaldo(transaction.optJSONObject("balance").optJSONObject("accountingBalance").optDouble("amount"));
-						newUmsatz.setTransactionId(transaction.optString("id"));
-						newUmsatz.setValuta(dateFormat.parse(transaction.optString("valueDate")));
-						newUmsatz.setZweck(transaction.optString("humanConceptName"));
-						newUmsatz.setZweck2(transaction.optString("humanExtendedConceptName"));
-
-						var detailSourceKey = transaction.optJSONObject("origin").optString("detailSourceKey");
-						var detailSourceId = transaction.optJSONObject("origin").optString("detailSourceId");
-						if (detailSourceKey != null && !"".equals(detailSourceKey) && !detailSourceKey.contains(" ") && !"KPSA".equals(detailSourceId))
+						var transaction = (JSONObject)t;
+	
+						try 
 						{
-							var detailResponse = doRequest("https://de-net.bbva.com/transfers/v0/transfers/" + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
-							if (detailResponse != null)
+							var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
+							newUmsatz.setKonto(konto);
+							newUmsatz.setArt(transaction.optJSONObject("concept").optString("name"));
+							newUmsatz.setBetrag(transaction.optJSONObject("amount").optDouble("amount"));
+							newUmsatz.setDatum(dateFormat.parse(transaction.optString("transactionDate")));
+							newUmsatz.setSaldo(transaction.optJSONObject("balance").optJSONObject("accountingBalance").optDouble("amount"));
+							newUmsatz.setTransactionId(transaction.optString("id"));
+							newUmsatz.setValuta(dateFormat.parse(transaction.optString("valueDate")));
+							newUmsatz.setZweck(transaction.optString("humanConceptName"));
+							newUmsatz.setZweck2(transaction.optString("humanExtendedConceptName"));
+	
+							var detailSourceKey = transaction.optJSONObject("origin").optString("detailSourceKey");
+							var detailSourceId = transaction.optJSONObject("origin").optString("detailSourceId");
+							if (detailSourceKey != null && !"".equals(detailSourceKey) && !detailSourceKey.contains(" ") && !"KPSA".equals(detailSourceId))
 							{
-								var details = detailResponse.getJSONObject().getJSONObject("data");
-
-								var gegenkto = details.getJSONObject("sender");
-								var eigenkto = details.getJSONObject("receiver");
-								if ("BBVADEFFXXX".equals(gegenkto.getJSONObject("bank").getString("BICCode")))
+								var detailResponse = doRequest("https://de-net.bbva.com/transfers/v0/transfers/" + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
+								if (detailResponse != null)
 								{
-									eigenkto = gegenkto;
-									gegenkto = details.optJSONObject("receiver");
+									var details = detailResponse.getJSONObject().getJSONObject("data");
+	
+									var gegenkto = details.getJSONObject("sender");
+									var eigenkto = details.getJSONObject("receiver");
+									if ("BBVADEFFXXX".equals(gegenkto.getJSONObject("bank").getString("BICCode")))
+									{
+										eigenkto = gegenkto;
+										gegenkto = details.optJSONObject("receiver");
+									}
+	
+									newUmsatz.setCustomerRef(eigenkto.optString("reference"));
+									newUmsatz.setGegenkontoBLZ(gegenkto.optJSONObject("bank").optString("BICCode"));
+									var name = gegenkto.optString("fullName"); 
+									if (name != null && !"".equals(name))
+									{
+										newUmsatz.setGegenkontoName(name);
+									}
+									else
+									{
+										newUmsatz.setGegenkontoName(gegenkto.optString("alias"));
+									}
+									newUmsatz.setGegenkontoNummer(gegenkto.optJSONObject("contract").optString("number"));
 								}
-
-								newUmsatz.setCustomerRef(eigenkto.optString("reference"));
-								newUmsatz.setGegenkontoBLZ(gegenkto.optJSONObject("bank").optString("BICCode"));
-								var name = gegenkto.optString("fullName"); 
-								if (name != null && !"".equals(name))
-								{
-									newUmsatz.setGegenkontoName(name);
-								}
-								else
-								{
-									newUmsatz.setGegenkontoName(gegenkto.optString("alias"));
-								}
-								newUmsatz.setGegenkontoNummer(gegenkto.optJSONObject("contract").optString("number"));
+							}
+	
+							if (getDuplicateById(newUmsatz) != null)
+							{
+								duplikatGefunden.value = true;
+							}
+							else
+							{
+								neueUmsaetze.add(newUmsatz);
 							}
 						}
-
-						if (getDuplicateById(newUmsatz) != null)
+						catch (Exception ex)
 						{
-							duplikatGefunden.value = true;
+							log(Level.ERROR, "Fehler beim Anlegen vom Umsatz: " + ex.toString());
 						}
-						else
-						{
-							neueUmsaetze.add(newUmsatz);
-						}
-					}
-					catch (Exception ex)
-					{
-						log(Level.ERROR, "Fehler beim Anlegen vom Umsatz: " + ex.toString());
-					}
-				});
+					});
+				}
 
 				page++;
 			} while (!duplikatGefunden.value && page < numPages);
