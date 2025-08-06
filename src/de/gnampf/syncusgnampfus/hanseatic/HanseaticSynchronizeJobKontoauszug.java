@@ -55,7 +55,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 	protected SynchronizeBackend getBackend() { return backend; }
 
 	@Override
-	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
+	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
 		log(Level.DEBUG, "besorge Basic-Credentials");
 		var response = doRequest("https://meine.hanseaticbank.de/de/register/sign-in", HttpMethod.GET, null, null, null);
@@ -64,6 +64,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		var baseUrl = textContent.replaceAll(".*NORTHLAYER_BASE_URL:\"([^\"]+)\".*", "$1");
 		var clientKey = textContent.replaceAll(".*NORTHLAYER_CLIENT_KEY:\"([^\"]+)\".*", "$1");
 		var clientSecret = textContent.replaceAll(".*NORTHLAYER_CLIENT_SECRET:\"([^\"]+)\".*", "$1");
+		var deviceToken = konto.getMeta(HanseaticSynchronizeBackend.META_DEVICETOKEN, null);
 		log(Level.DEBUG, "Basic-Auth-Token = " + basicAuth + ", BaseUrl: " + baseUrl + ", ClientKey = " + clientKey + ", ClientSecret = " + clientSecret);
 
 		log(Level.INFO, "Hole allgemeines Token");
@@ -87,6 +88,10 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		
 		permanentHeaders.clear();
 		permanentHeaders.add(new KeyValue<>("authorization", "Basic " + basicAuth));
+		if (deviceToken != null)
+		{
+			permanentHeaders.add(new KeyValue<>("DEVICETOKEN", deviceToken));
+		}
 
 		response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
 		if (response.getHttpStatus() != 200)
@@ -95,7 +100,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			throw new ApplicationException("Login fehlgeschlagen, Fehlercode " + response.getHttpStatus());
 		}
 
-		 json = response.getJSONObject();
+		json = response.getJSONObject();
 		String token = json.optString("access_token");
 		if (token == null || token.isBlank())
 		{
@@ -106,7 +111,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 				throw new ApplicationException("Weder ein Acess- noch ein ID-Token erhalten");
 			}
 
-			log(Level.INFO, "Anmeldung muss in der Hanseatic-App bestätigt werden!");
+			log(Level.INFO, "Anmeldung muss in der Hanseatic-App best\u00E4tigt werden!");
 
 			permanentHeaders.clear();
 			permanentHeaders.add(new KeyValue<>("authorization", "Bearer " + genericToken));
@@ -117,7 +122,6 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			JSONObject idt = new JSONObject(js);
 			var scaId = idt.optString("sca_id");
 			
-			String deviceToken = null;
 			while (true) 
 			{
 				response = doRequest(baseUrl + "/openScaBroker/1.0/customer/" +  URLEncoder.encode(user, "UTF-8") + "/status/" + scaId, HttpMethod.GET, null, null, null);
@@ -128,11 +132,22 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 					if (resultData != null)
 					{
 						deviceToken = resultData.optString("DEVICETOKEN");
+						konto.setMeta(HanseaticSynchronizeBackend.META_DEVICETOKEN, deviceToken);
 					}
 					break;
 				}
 				else if ("open".equals(status) || "accepted".equals(status))
 				{
+					if ("SMS".equals(response.getJSONObject().optString("scaType")))
+					{
+						throw new ApplicationException("Login erfodert eine TAN per SMS, was leider bisher noch nicht implementiert ist. Bitte einmal auf der Website einloggen, danach sollte erstmal keine TAN mehr erforderlich sein.");
+						/*var requestText = "Bitte geben Sie die TAN ein, das sie per SMS erhalten haben.";
+						var sca = Application.getCallback().askUser(requestText, "TAN:");
+						if (sca == null || sca.isBlank())
+						{
+							throw new ApplicationException("Login abgebrochen wegen fehlender TAN");
+						}*/
+					}
 					log(Level.INFO, "Status ist " + status);
 					Thread.sleep(5000);
 				}
@@ -244,6 +259,11 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 				JSONArray transactionsArray = json.optJSONArray("transactions");
 				more = json.optBoolean("more", false);
 				moreWithSCA = json.optBoolean("moreWithSCA", false);
+				
+				if (moreWithSCA && scaDone)
+				{
+					log(Level.ERROR, "Erfolgreiche Zwei-Faktor-Anmeldung, aber trotzdem wird ein zweiter Faktor angefordert?");
+				}
 
 				log(Level.INFO, "lese Seite "+pageNo);
 				monitor.setPercentComplete(monitor.getPercentComplete() + 1);
@@ -296,28 +316,28 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 						arbeitsSaldo -= betrag;
 					}
 
-					var duplicate = getDuplicateByCompare(newUmsatz); 
-					if (duplicate != null)
+					var bekannterUmsatz = getDuplicateByCompare(newUmsatz); 
+					if (bekannterUmsatz != null)
 					{		                		
 						gotDuplicate = true;
-						if (duplicate.hasFlag(Umsatz.FLAG_NOTBOOKED))
+						bekannterUmsatz.setSaldo(newUmsatz.getSaldo());
+						if (bekannterUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
 						{
-							duplicate.setFlags(newUmsatz.getFlags());
-							duplicate.setSaldo(newUmsatz.getSaldo());
-							duplicate.setWeitereVerwendungszwecke(newUmsatz.getWeitereVerwendungszwecke());
+							bekannterUmsatz.setFlags(newUmsatz.getFlags());
+							bekannterUmsatz.setWeitereVerwendungszwecke(newUmsatz.getWeitereVerwendungszwecke());
 
-							duplicate.setGegenkontoBLZ(newUmsatz.getGegenkontoBLZ());
-							duplicate.setGegenkontoName(newUmsatz.getGegenkontoName());
-							duplicate.setGegenkontoNummer(newUmsatz.getGegenkontoNummer());
-							duplicate.setValuta(newUmsatz.getValuta());
-							duplicate.setArt(newUmsatz.getArt());
-							duplicate.setCreditorId(newUmsatz.getCreditorId());
-							duplicate.setMandateId(newUmsatz.getMandateId());
-							duplicate.setCustomerRef(newUmsatz.getCustomerRef());
-							duplicate.store();
-							duplikate.add(duplicate);
-							Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(duplicate));
+							bekannterUmsatz.setGegenkontoBLZ(newUmsatz.getGegenkontoBLZ());
+							bekannterUmsatz.setGegenkontoName(newUmsatz.getGegenkontoName());
+							bekannterUmsatz.setGegenkontoNummer(newUmsatz.getGegenkontoNummer());
+							bekannterUmsatz.setValuta(newUmsatz.getValuta());
+							bekannterUmsatz.setArt(newUmsatz.getArt());
+							bekannterUmsatz.setCreditorId(newUmsatz.getCreditorId());
+							bekannterUmsatz.setMandateId(newUmsatz.getMandateId());
+							bekannterUmsatz.setCustomerRef(newUmsatz.getCustomerRef());
+							duplikate.add(bekannterUmsatz);
 						}
+						bekannterUmsatz.store();
+						Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(bekannterUmsatz));
 					}
 					else
 					{
@@ -325,7 +345,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 					}
 				}
 
-				if (!gotDuplicate && !more && moreWithSCA && !scaDone)
+				if ((forceAll || !gotDuplicate) && !more && moreWithSCA && !scaDone)
 				{
 					log(Level.INFO, "Ben\u00f6tige zweiten Faktor f\u00FCr weitere Ums\u00e4tze...");
 
@@ -334,7 +354,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 
 					do 
 					{
-						response = doRequest(baseUrl + "/scaBroker/1.0/session", HttpMethod.POST, null, "application/json", "{\"initiator\":\"ton-sca-fe\",\"lang\":\"de\",\"session\":\"" + token + "\"}");
+						response = doRequest(baseUrl + "/scaBroker/1.0/session", HttpMethod.POST, null, "application/json", "{\"initiator\":\"ton-sca-fe\",\"lang\":\"de\",\"session\":\"" + tokenType + " " + token + "\"}");
 						if (response.getHttpStatus() != 200)
 						{
 							log(Level.DEBUG, "Response: " + response.getContent());
@@ -344,23 +364,40 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 						var type = json.optString("scaType", "Unbekannt");
 						var uniqueId = json.optString("scaUniqueId");
 
-						var requestText = "Bitte geben Sie die TAN ein, das sie per " + type + " erhalten haben.";
-						if (status != null)
+						String sca = null;
+						if ("SMS".equals(type))
 						{
-							requestText += "\nDer letzte Code wurde nicht akzeptiert, Status " + resultCode + " / " + status;
-						}
+							var requestText = "Bitte geben Sie die TAN ein, das sie per " + type + " erhalten haben.";
+							if (status != null)
+							{
+								requestText += "\nDer letzte Code wurde nicht akzeptiert, Status " + resultCode + " / " + status;
+							}
 
-						var sca = Application.getCallback().askUser(requestText, "TAN:");
-						if (sca == null || sca.isBlank())
-						{
-							more = false;
-							moreWithSCA = false;
-							log(Level.WARN, "TAN-Eingabe abgebrochen");
-							break;
+							 sca = Application.getCallback().askUser(requestText, "TAN:");
+							if (sca == null || sca.isBlank())
+							{
+								more = false;
+								moreWithSCA = false;
+								log(Level.WARN, "TAN-Eingabe abgebrochen");
+								break;
+							}
 						}
 						else
 						{
-							response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.PUT, null, "application/json", "{\"otp\":\"" + sca + "\"}");
+							log(Level.INFO, "Abruf \\u00E4lterer Ums\\u00E4tze muss in der App best\\u00E4tigt werden!");
+						}
+
+						while (true)
+						{
+							if (sca != null)
+							{
+								response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.PUT, null, "application/json", "{\"otp\":\"" + sca + "\"}");
+							}
+							else
+							{
+								response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.GET, null, null, null);
+							}
+							
 							if (response.getHttpStatus() != 200)
 							{
 								log(Level.DEBUG, "Response: " + response.getContent());
@@ -369,13 +406,13 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 							json = response.getJSONObject();
 							status = json.optString("status");
 							resultCode = json.optInt("resultCode");
-
-							if (!"complete".equals(status) || resultCode != 200)
+	
+							if ("open".equals(status) || "accepted".equals(status))
 							{
-								log(Level.DEBUG, "Response: " + response.getContent());
-								throw new ApplicationException("2FA-Validierung fehlgeschlagen, Status = " + status + ", Result = " + resultCode);
+								log(Level.INFO, "Warte auf Best\u00E4tigung in der App");
+								Thread.sleep(5000);
 							}
-							else
+							else if ("complete".equals(status) && resultCode == 200)
 							{
 								scaDone = true;
 								neueUmsaetze.clear();
@@ -384,11 +421,17 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 								log(Level.INFO, "Starte Umsatzabfrage neu nach Eingabe zweiter Faktor");
 								break;
 							}
+							else
+							{
+								log(Level.DEBUG, "Response: " + response.getContent());
+								log(Level.WARN, "2FA-Validierung fehlgeschlagen, Status = " + status + ", Result = " + resultCode);
+								scaDone = false;
+							}
 						}
 					}
-					while (true);
+					while (!scaDone);
 				}	                
-			} while (!gotDuplicate && (more || moreWithSCA));
+			} while ((forceAll || !gotDuplicate) && (more || moreWithSCA));
 
 			monitor.setPercentComplete(75); 
 			log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");
