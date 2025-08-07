@@ -1,24 +1,14 @@
 package de.gnampf.syncusgnampfus.bbva;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
 import java.rmi.RemoteException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.Hashtable;
 import java.util.TimeZone;
 
 import javax.annotation.Resource;
 
-import org.htmlunit.CookieManager;
-import org.htmlunit.FailingHttpStatusCodeException;
 import org.htmlunit.HttpMethod;
-import org.htmlunit.Page;
-import org.htmlunit.ProxyConfig;
-import org.htmlunit.WebClient;
-import org.htmlunit.WebRequest;
-import org.htmlunit.WebResponse;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -28,19 +18,14 @@ import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobKontoauszug;
 import de.gnampf.syncusgnampfus.WebResult;
 import de.willuhn.datasource.rmi.DBIterator;
 import de.willuhn.jameica.hbci.Settings;
-import de.willuhn.jameica.hbci.SynchronizeOptions;
-import de.willuhn.jameica.hbci.messaging.ImportMessage;
 import de.willuhn.jameica.hbci.messaging.SaldoMessage;
 import de.willuhn.jameica.hbci.rmi.Konto;
 import de.willuhn.jameica.hbci.rmi.Umsatz;
 import de.willuhn.jameica.hbci.synchronize.SynchronizeBackend;
-import de.willuhn.jameica.hbci.synchronize.jobs.SynchronizeJobKontoauszug;
-import de.willuhn.jameica.security.Wallet;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.logging.Level;
 import de.willuhn.logging.Logger;
 import de.willuhn.util.ApplicationException;
-import de.willuhn.util.ProgressMonitor;
 
 public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {

@@ -1,20 +1,11 @@
 package de.gnampf.syncusgnampfus;
 
-import java.rmi.RemoteException;
-import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
-import javax.annotation.Resource;
-
-import de.gnampf.syncusgnampfus.amex.AMEXSynchronizeJobKontoauszug;
-import de.gnampf.syncusgnampfus.bbva.BBVASynchronizeJobKontoauszug;
-import de.gnampf.syncusgnampfus.hanseatic.HanseaticSynchronizeBackend;
-import de.gnampf.syncusgnampfus.hanseatic.HanseaticSynchronizeJobKontoauszug;
 import de.willuhn.jameica.hbci.SynchronizeOptions;
 import de.willuhn.jameica.hbci.rmi.Konto;
 import de.willuhn.jameica.hbci.synchronize.AbstractSynchronizeBackend;
-import de.willuhn.jameica.hbci.synchronize.SynchronizeBackend;
 import de.willuhn.jameica.hbci.synchronize.jobs.SynchronizeJob;
 import de.willuhn.jameica.hbci.synchronize.jobs.SynchronizeJobKontoauszug;
 import de.willuhn.logging.Logger;

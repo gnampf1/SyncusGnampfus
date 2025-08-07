@@ -245,6 +245,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			long d1 = buchung2.getDatum().getTime();
 			long d2 = buchung.getDatum().getTime();
 			long d3 = buchung.getValuta().getTime();
+			long d4 = buchung2.getValuta().getTime();
 			String z1 = buchung2.getZweck();
 			String z2 = buchung.getZweck();
 			Double b1 = buchung2.getBetrag();
@@ -260,7 +261,8 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			}
 
 			if (b1.equals(b2) &&
-					(d1 == d2 || d1 == d3) &&
+					(d1 == d2) &&
+					(d3 == d4 || d4 == d1) &&
 					z1.equals(z2)
 					)
 			{
