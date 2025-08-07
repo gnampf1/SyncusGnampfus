@@ -233,7 +233,8 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							if (detailSourceKey != null && !"".equals(detailSourceKey) && !detailSourceKey.contains(" ") && !"KPSA".equals(detailSourceId))
 							{
 								var detailResponse = doRequest("https://de-net.bbva.com/transfers/v0/transfers/" + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
-								if (detailResponse != null)
+								var detailJSON = detailResponse.getJSONObject();
+								if (detailJSON != null && detailJSON.has("data"))
 								{
 									var details = detailResponse.getJSONObject().getJSONObject("data");
 	
@@ -257,6 +258,10 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 										newUmsatz.setGegenkontoName(gegenkto.optString("alias"));
 									}
 									newUmsatz.setGegenkontoNummer(gegenkto.optJSONObject("contract").optString("number"));
+								}
+								else
+								{
+									log(Level.WARN, "Keine Umsatzdetails, obwohl erwartet. Bitte DetailSourceId = " + detailSourceId + " an gnampf melden");
 								}
 							}
 	

@@ -24,6 +24,7 @@ import com.microsoft.playwright.options.WaitForSelectorState;
 import de.gnampf.syncusgnampfus.KeyValue;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJob;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobKontoauszug;
+import de.gnampf.syncusgnampfus.WebResult;
 import de.willuhn.datasource.rmi.DBIterator;
 import de.willuhn.jameica.hbci.Settings;
 import de.willuhn.jameica.hbci.messaging.ObjectChangedMessage;
@@ -47,14 +48,14 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	@Override
 	protected SynchronizeBackend getBackend() { return backend; }
 
-	private AMEXRequestInterceptor GetCorrelationId(Konto konto, String user, String passwort) throws Exception 
+	private AMEXRequestInterceptor GetCorrelationId(Konto konto, String user, String passwort, int retry) throws Exception 
 	{
 		log(Level.INFO, "Ermittlung CorrelationId gestartet");
 		var interceptor = new AMEXRequestInterceptor();
 		try (Playwright playwright = Playwright.create()) 
 		{
 			var headless = "false".equals(konto.getMeta(AMEXSynchronizeBackend.META_NOTHEADLESS,  "false"));
-			var options1 = new BrowserType.LaunchOptions().setSlowMo(100).setHeadless(headless);
+			var options1 = new BrowserType.LaunchOptions().setSlowMo(100 * retry).setHeadless(headless);
 			var browser = playwright.chromium().launch(options1);
 
 			var stealthContext = Stealth4j.newStealthContext(browser);
@@ -210,11 +211,24 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			ArrayList<Umsatz> neueUmsaetze = new ArrayList<Umsatz>();
 
 			addDeviceCookies(konto);
-			var interceptor = GetCorrelationId(konto, user, passwort);
+			AMEXRequestInterceptor interceptor = null;
 			addDeviceCookies(konto);
 			monitor.setPercentComplete(5);
+			WebResult response;
 
-			var response = doRequest(interceptor.Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
+			int retry = 0;
+			do 
+			{
+				if (retry > 0)
+				{
+					log(Level.WARN, "CorrelationId wurde nicht akzeptiert, starte Retry Nr. " + retry + "in " + (retry * 20) + " Sekunden");
+					Thread.sleep(retry * 1000 * 10);
+				}
+				retry++;
+				interceptor = GetCorrelationId(konto, user, passwort, retry);
+				response = doRequest(interceptor.Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
+			}
+			while (response.getHttpStatus() == 403 && retry < 4);
 			if (response.getHttpStatus() != 200)
 			{
 				log(Level.DEBUG, "Response: " + response.getContent());
