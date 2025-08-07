@@ -1,50 +1,28 @@
 package de.gnampf.syncusgnampfus.hanseatic;
 
-import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.rmi.RemoteException;
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Hashtable;
 import javax.annotation.Resource;
 
-import org.htmlunit.CookieManager;
-import org.htmlunit.FailingHttpStatusCodeException;
 import org.htmlunit.HttpMethod;
-import org.htmlunit.Page;
-import org.htmlunit.ProxyConfig;
-import org.htmlunit.WebClient;
-import org.htmlunit.WebRequest;
-import org.htmlunit.html.HtmlPage;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJob;
 import de.gnampf.syncusgnampfus.KeyValue;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobKontoauszug;
-import de.gnampf.syncusgnampfus.WebResult;
 import de.willuhn.datasource.rmi.DBIterator;
 import de.willuhn.jameica.hbci.Settings;
-import de.willuhn.jameica.hbci.SynchronizeOptions;
-import de.willuhn.jameica.hbci.messaging.ImportMessage;
 import de.willuhn.jameica.hbci.messaging.ObjectChangedMessage;
-import de.willuhn.jameica.hbci.messaging.ObjectDeletedMessage;
 import de.willuhn.jameica.hbci.messaging.SaldoMessage;
 import de.willuhn.jameica.hbci.rmi.Konto;
 import de.willuhn.jameica.hbci.rmi.Umsatz;
 import de.willuhn.jameica.hbci.synchronize.SynchronizeBackend;
-import de.willuhn.jameica.hbci.synchronize.jobs.SynchronizeJobKontoauszug;
-import de.willuhn.jameica.security.Wallet;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.logging.Level;
-import de.willuhn.logging.Logger;
 import de.willuhn.util.ApplicationException;
-import de.willuhn.util.ProgressMonitor;
-
-// Spezifisch, eigentliche Implementierung
 
 public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {
@@ -273,16 +251,16 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 					var transaction = (JSONObject)obj;
 
 					var betrag = transaction.getDouble("amount");
-					var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
-					newUmsatz.setKonto(konto);
-					newUmsatz.setBetrag(betrag);
-					newUmsatz.setDatum(dateFormat.parse(transaction.getString("transactionDate")));
-					newUmsatz.setGegenkontoBLZ(transaction.optString("recipientBic"));
-					newUmsatz.setGegenkontoName(transaction.optString("recipientName"));
-					newUmsatz.setGegenkontoNummer(transaction.optString("recipientIban"));
-					newUmsatz.setValuta(dateFormat.parse(transaction.getString("date") + " 00:00"));
-					newUmsatz.setZweck(transaction.optString("description"));
-					newUmsatz.setArt(transaction.optString("creditDebitKey"));
+					var neuerUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
+					neuerUmsatz.setKonto(konto);
+					neuerUmsatz.setBetrag(betrag);
+					neuerUmsatz.setValuta(dateFormat.parse(transaction.getString("transactionDate")));
+					neuerUmsatz.setGegenkontoBLZ(transaction.optString("recipientBic"));
+					neuerUmsatz.setGegenkontoName(transaction.optString("recipientName"));
+					neuerUmsatz.setGegenkontoNummer(transaction.optString("recipientIban"));
+					neuerUmsatz.setDatum(dateFormat.parse(transaction.getString("date") + " 00:00"));
+					neuerUmsatz.setZweck(transaction.optString("description"));
+					neuerUmsatz.setArt(transaction.optString("creditDebitKey"));
 
 					ArrayList<String> details = new ArrayList<String>();
 
@@ -293,9 +271,10 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 					var conversionRate = transaction.optString("conversionRate");
 					if (conversionRate != null && !conversionRate.isBlank()) details.add("Wechselkurs: " + conversionRate);
 
-					newUmsatz.setCreditorId(transaction.optString("creditorID"));
-					newUmsatz.setMandateId(transaction.optString("mandateReference"));
-					newUmsatz.setCustomerRef(transaction.optString("transactionId"));
+					neuerUmsatz.setCreditorId(transaction.optString("creditorID"));
+					neuerUmsatz.setMandateId(transaction.optString("mandateReference"));
+					neuerUmsatz.setCustomerRef(transaction.optString("transactionId"));
+					neuerUmsatz.setTransactionId(transaction.optString("transactionId"));
 
 					for (int j = 0; j < details.size(); j++)
 					{
@@ -305,43 +284,41 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 							details.set(j, details.get(j).substring(0,35));
 						}
 					}
-					newUmsatz.setWeitereVerwendungszwecke(details.toArray(new String[0]));
+					neuerUmsatz.setWeitereVerwendungszwecke(details.toArray(new String[0]));
 					if (transaction.optBoolean("booked", true) == false)
 					{
-						newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
+						neuerUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
 					}
 					else 
 					{
-						newUmsatz.setSaldo(arbeitsSaldo); // Zwischensaldo
+						neuerUmsatz.setSaldo(arbeitsSaldo); // Zwischensaldo
 						arbeitsSaldo -= betrag;
 					}
 
-					var bekannterUmsatz = getDuplicateByCompare(newUmsatz); 
+					var bekannterUmsatz = getDuplicateById(neuerUmsatz); 
 					if (bekannterUmsatz != null)
 					{		                		
 						gotDuplicate = true;
-						bekannterUmsatz.setSaldo(newUmsatz.getSaldo());
-						if (bekannterUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
-						{
-							bekannterUmsatz.setFlags(newUmsatz.getFlags());
-							bekannterUmsatz.setWeitereVerwendungszwecke(newUmsatz.getWeitereVerwendungszwecke());
-
-							bekannterUmsatz.setGegenkontoBLZ(newUmsatz.getGegenkontoBLZ());
-							bekannterUmsatz.setGegenkontoName(newUmsatz.getGegenkontoName());
-							bekannterUmsatz.setGegenkontoNummer(newUmsatz.getGegenkontoNummer());
-							bekannterUmsatz.setValuta(newUmsatz.getValuta());
-							bekannterUmsatz.setArt(newUmsatz.getArt());
-							bekannterUmsatz.setCreditorId(newUmsatz.getCreditorId());
-							bekannterUmsatz.setMandateId(newUmsatz.getMandateId());
-							bekannterUmsatz.setCustomerRef(newUmsatz.getCustomerRef());
-							duplikate.add(bekannterUmsatz);
-						}
-						bekannterUmsatz.store();
-						Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(bekannterUmsatz));
+						BekanntenUmsatzBehandeln(bekannterUmsatz, neuerUmsatz, duplikate);
 					}
 					else
 					{
-						neueUmsaetze.add(newUmsatz);
+						var valuta = neuerUmsatz.getValuta();
+						var datum = neuerUmsatz.getDatum();
+						neuerUmsatz.setDatum(valuta);
+						neuerUmsatz.setValuta(datum);
+						bekannterUmsatz = getDuplicateByCompare(neuerUmsatz);
+						neuerUmsatz.setDatum(datum);
+						neuerUmsatz.setValuta(valuta);
+
+						if (bekannterUmsatz != null)
+						{
+							BekanntenUmsatzBehandeln(bekannterUmsatz, neuerUmsatz, duplikate);
+						}
+						else
+						{
+							neueUmsaetze.add(neuerUmsatz);
+						}
 					}
 				}
 
@@ -445,5 +422,29 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		}
 
 		return true;
+	}
+	
+	void BekanntenUmsatzBehandeln(Umsatz bekannterUmsatz, Umsatz neuerUmsatz, ArrayList<Umsatz> duplikate) throws RemoteException, ApplicationException
+	{
+		if (bekannterUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
+		{
+			bekannterUmsatz.setFlags(neuerUmsatz.getFlags());
+			duplikate.add(bekannterUmsatz);
+		}
+		bekannterUmsatz.setTransactionId(neuerUmsatz.getTransactionId());
+		bekannterUmsatz.setSaldo(neuerUmsatz.getSaldo());
+		bekannterUmsatz.setWeitereVerwendungszwecke(neuerUmsatz.getWeitereVerwendungszwecke());
+		bekannterUmsatz.setGegenkontoBLZ(neuerUmsatz.getGegenkontoBLZ());
+		bekannterUmsatz.setGegenkontoName(neuerUmsatz.getGegenkontoName());
+		bekannterUmsatz.setGegenkontoNummer(neuerUmsatz.getGegenkontoNummer());
+		bekannterUmsatz.setValuta(neuerUmsatz.getValuta());
+		bekannterUmsatz.setDatum(neuerUmsatz.getDatum());
+		bekannterUmsatz.setArt(neuerUmsatz.getArt());
+		bekannterUmsatz.setCreditorId(neuerUmsatz.getCreditorId());
+		bekannterUmsatz.setMandateId(neuerUmsatz.getMandateId());
+		bekannterUmsatz.setCustomerRef(neuerUmsatz.getCustomerRef());
+		
+		bekannterUmsatz.store();
+		Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(bekannterUmsatz));
 	}
 }
