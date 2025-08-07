@@ -35,6 +35,18 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 	@Override
 	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
+		umsaetze.begin();
+		while (umsaetze.hasNext())
+		{
+			var umsatz = umsaetze.next();
+			var tID = umsatz.getTransactionId();
+			if (tID != null && !tID.contains(":"))
+			{
+				tID = tID + ":" + umsatz.getBetrag();
+				umsatz.store();
+			}
+		}
+		
 		log(Level.DEBUG, "besorge Basic-Credentials");
 		var response = doRequest("https://meine.hanseaticbank.de/de/register/sign-in", HttpMethod.GET, null, null, null);
 		var textContent = response.getContent().replace("\n", "").replace("\r", "");
@@ -273,8 +285,13 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 
 					neuerUmsatz.setCreditorId(transaction.optString("creditorID"));
 					neuerUmsatz.setMandateId(transaction.optString("mandateReference"));
-					neuerUmsatz.setCustomerRef(transaction.optString("transactionId"));
-					neuerUmsatz.setTransactionId(transaction.optString("transactionId"));
+					var transactionId = transaction.optString("transactionId");
+					neuerUmsatz.setCustomerRef(transactionId);
+					if (transactionId == null || transactionId.isBlank())
+					{
+						transactionId = neuerUmsatz.getDatum().getTime() + "/" + neuerUmsatz.getValuta().getTime() + "/" + transactionTime + neuerUmsatz.getZweck().hashCode();
+					}
+					neuerUmsatz.setTransactionId(transactionId + ":" + betrag);
 
 					for (int j = 0; j < details.size(); j++)
 					{
