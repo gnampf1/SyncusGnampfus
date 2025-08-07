@@ -210,9 +210,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		{
 			ArrayList<Umsatz> neueUmsaetze = new ArrayList<Umsatz>();
 
-			addDeviceCookies(konto);
 			AMEXRequestInterceptor interceptor = null;
-			addDeviceCookies(konto);
 			monitor.setPercentComplete(5);
 			WebResult response;
 
@@ -222,10 +220,13 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				if (retry > 0)
 				{
 					log(Level.WARN, "CorrelationId wurde nicht akzeptiert, starte Retry Nr. " + retry + "in " + (retry * 20) + " Sekunden");
-					Thread.sleep(retry * 1000 * 10);
+					Thread.sleep(retry * 1000 * 20);
 				}
 				retry++;
 				interceptor = GetCorrelationId(konto, user, passwort, retry);
+
+				addDeviceCookies(konto);
+				
 				response = doRequest(interceptor.Url, HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", interceptor.Body.replace("BlahIdBlah", URLEncoder.encode(user, "UTF-8")).replace("BlahWortBlah", URLEncoder.encode(passwort, "UTF-8")));
 			}
 			while (response.getHttpStatus() == 403 && retry < 4);
@@ -414,10 +415,10 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					else 
 					{
 						ArrayList<String> cookieNames = new ArrayList<>();
-						var cookiesJSON = new JSONArray(konto.getMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, "[]"));
+						var cookiesJSON = new JSONArray(); //konto.getMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, "[]"));
 						for (var header : response.getResponseHeader())
 						{
-							if ("set-cookie".equals(header.getName().toLowerCase()))
+							if ("set-cookie".equals(header.getName().toLowerCase()) && header.getValue().toLowerCase().contains("domain=.americanexpress.com"))
 							{
 								cookieNames.add(header.getValue().replaceAll("=.*", ""));
 							}
@@ -425,20 +426,27 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						var cookieManager = webClient.getCookieManager();
 						for (var name : cookieNames)
 						{
-							var cookie = cookieManager.getCookie(name);
-							var cookieJSON = new JSONObject();
-							cookieJSON.put("domain", cookie.getDomain());
-							cookieJSON.put("name", cookie.getName());
-							cookieJSON.put("value", cookie.getValue());
-							cookieJSON.put("path", cookie.getPath());
-							if (cookie.getExpires() != null)
+							var allCookies = cookieManager.getCookies();
+							for (var cookie : allCookies)
 							{
-								cookieJSON.put("expires", cookie.getExpires().getTime());
+								if (cookie.getName().equals(name) && cookie.getDomain().equals(".americanexpress.com"))
+								{
+									var cookieJSON = new JSONObject();
+									cookieJSON.put("domain", cookie.getDomain());
+									cookieJSON.put("name", cookie.getName());
+									cookieJSON.put("value", cookie.getValue());
+									cookieJSON.put("path", cookie.getPath());
+									if (cookie.getExpires() != null)
+									{
+										cookieJSON.put("expires", cookie.getExpires().getTime());
+									}
+									cookieJSON.put("secure", cookie.isSecure());
+									cookieJSON.put("httpOnly",  cookie.isHttpOnly());
+									cookieJSON.put("sameSite", cookie.getSameSite());
+									cookiesJSON.put(cookieJSON);
+									break;
+								}
 							}
-							cookieJSON.put("secure", cookie.isSecure());
-							cookieJSON.put("httpOnly",  cookie.isHttpOnly());
-							cookieJSON.put("sameSite", cookie.getSameSite());
-							cookiesJSON.put(cookieJSON);
 						}
 						konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, cookiesJSON.toString());
 					}
