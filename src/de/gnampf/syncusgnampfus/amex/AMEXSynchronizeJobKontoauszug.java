@@ -605,7 +605,17 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				log(Level.DEBUG, "Response: " + response.getContent());
 				throw new ApplicationException("Saldostatusabfrage fehlgeschlagen, Status = " + response.getHttpStatus());
 			}
-			var saldo = new SaldoContainer(-response.getJSONArray().getJSONObject(0).getDouble("statement_balance_amount"));
+			var saldoArray = response.getJSONArray();
+			var saldo = new SaldoContainer();
+			for (int i = 0; i < saldoArray.length(); i++)
+			{
+				var saldoObj = saldoArray.getJSONObject(i);
+				if (accountToken.equals(saldoObj.optString("account_token")))
+				{
+					saldo.value = -saldoObj.getDouble("statement_balance_amount");
+					break;
+				}
+			}
 			if (fetchSaldo)
 			{
 				konto.setSaldo(saldo.value); // last_statement_balance_amount, interest_saver_amount
@@ -672,7 +682,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	private class SaldoContainer 
 	{
 		public Double value;
-		public SaldoContainer(Double saldo) {value = saldo; }
+		public SaldoContainer() {}
 	}
 
 	private ArrayList<Umsatz> processTransactions(Konto konto, ArrayList<Umsatz> neueUmsaetze, DBIterator<Umsatz> vorhandeneUmsaetze, JSONArray transactions, boolean pending, SaldoContainer saldo) throws RemoteException, ParseException, ApplicationException
