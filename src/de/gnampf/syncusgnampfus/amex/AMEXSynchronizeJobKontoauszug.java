@@ -144,6 +144,12 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			pwPage.close();
 			browser.close();
+			
+			log(Level.INFO, "URL: " + interceptor.Url);
+			for (var h : interceptor.Header)
+			{
+				log(Level.INFO, "Header: " + h.getKey() + " = " + h.getValue());
+			}
 		}
 		catch (Exception e)
 		{
