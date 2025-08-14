@@ -201,9 +201,13 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		webClient.getOptions().setCssEnabled(false);
 
 		// WebClient mit den den Proxy-Einstellungen anlegen
-		if (proxyConfig != null)
+ 		if (proxyConfig != null)
 		{
 			webClient.getOptions().setProxyConfig(proxyConfig);
+		}
+		else
+		{
+			webClient.getOptions().setProxyConfig(new ProxyConfig());
 		}
 
 		if (cookieCache != null)

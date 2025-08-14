@@ -1,15 +1,12 @@
 package de.gnampf.syncusgnampfus.amex;
 
-import de.gnampf.syncusgnampfus.KeyValue;
-
-import java.util.ArrayList;
+import de.gnampf.syncusgnampfus.WebResult;
 
 public class AMEXRequestInterceptor 
 {
-	public String Body = null;
-	public String Url = null;
 	public String log = "";
-	public ArrayList<KeyValue<String, String>> Header = new ArrayList<KeyValue<String, String>>();
+	public WebResult Response = null;
+	public boolean clearCookies = false;
 	public AMEXRequestInterceptor() 
 	{
 	}
