@@ -6,7 +6,7 @@ public class AMEXRequestInterceptor
 {
 	public String log = "";
 	public WebResult Response = null;
-	public boolean clearCookies = false;
+	public int errorCount = 0;
 	public AMEXRequestInterceptor() 
 	{
 	}
