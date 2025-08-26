@@ -23,6 +23,7 @@ import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Locator.WaitForOptions;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
 import com.microsoft.playwright.options.Cookie;
@@ -44,6 +45,7 @@ import de.willuhn.jameica.system.Application;
 import de.willuhn.logging.Level;
 import de.willuhn.util.ApplicationException;
 import io.github.kihdev.playwright.stealth4j.Stealth4j;
+import io.github.kihdev.playwright.stealth4j.Stealth4jConfig;
 
 
 public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
@@ -55,7 +57,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 	@Override
 	protected SynchronizeBackend getBackend() { return backend; }
-
 
 	private AMEXRequestInterceptor GetCorrelationId(Page pwPage, Konto konto, String user, String passwort) throws Exception 
 	{
@@ -71,7 +72,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					if (r.status() == 403)
 					{
 						log(Level.WARN, "403 beim Login erhalten");
-						interceptor.clearCookies = true;
+						interceptor.errorCount++;
 					}
 					else if (r.status() == 200)
 					{
@@ -90,7 +91,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					else
 					{
 						log(Level.INFO, "Status ist " + r.status() + " f\u00FCr url " + r.url());
-						interceptor.clearCookies = true;
+						interceptor.errorCount++;
 					}
 				}
 			}
@@ -104,7 +105,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				if (request.url().endsWith("/myca/logon/emea/action/login") && "POST".equals(request.method()))
 				{
 					log(Level.INFO, "Fehler beim Login erhalten: " + request.failure());
-					interceptor.clearCookies = true;
+					interceptor.errorCount++;
 				}			
 			}
 		};
@@ -113,6 +114,16 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		pwPage.onResponse(responseHandler);
 
 		pwPage.navigate("https://www.americanexpress.com/de-de/account/login?DestPage=https%3A%2F%2Fglobal.americanexpress.com%2Factivity%2Frecent%3Fappv5%3Dfalse");
+		var userInput = pwPage.getByTestId("userid-input");
+		try 
+		{
+			userInput.waitFor(new WaitForOptions().setTimeout(1000));
+		} catch (Exception e)
+		{
+			pwPage.reload();
+			userInput = pwPage.getByTestId("userid-input");
+		}
+		
 		var cookieBanner = pwPage.getByTestId("granular-banner-button-accept-all");
 		if (cookieBanner != null)
 		{
@@ -126,37 +137,26 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			} 
 			catch (com.microsoft.playwright.TimeoutError e) { }
 		}
-		pwPage.getByTestId("userid-input").fill(user); 
+
+		userInput.fill(user); 
 		pwPage.getByTestId("password-input").fill(passwort); 
 		pwPage.getByTestId("submit-button").click();
 
 		int timeout = 600;
-		while (interceptor.Response == null && !interceptor.clearCookies && timeout > 0)
+		while (interceptor.Response == null && interceptor.errorCount < 5 && timeout > 0)
 		{
 			pwPage.screenshot();
 			Thread.sleep(100);
 			timeout--;
 		}
 
-		if (interceptor.clearCookies)
+		if (interceptor.errorCount >= 5)
 		{
-			var cookies = konto.getMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, null);
-			if (cookies != null && !cookies.isBlank())
-			{
-				log(Level.INFO, "L\u00f6sche gespeicherte Cookies und versuche es erneut");
-				konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, null);
-				pwPage.context().clearCookies();
-				return GetCorrelationId(pwPage, konto, user, passwort);
-			}
-			else
-			{
-				throw new ApplicationException("Login fehlgeschlagen wegen technischer Probleme");
-			}
+			throw new ApplicationException("Login fehlgeschlagen wegen technischer Probleme");
 		}
 		
 		if (timeout == 0)
 		{
-			konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, null);
 			throw new ApplicationException("Timeout beim Ermitteln der CorrelationId");
 		}
 
@@ -197,7 +197,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			monitor.setPercentComplete(5);
 			Playwright playwright = Playwright.create(); 
 			var headless = "false".equals(konto.getMeta(AMEXSynchronizeBackend.META_NOTHEADLESS,  "false"));
-			var options1 = new BrowserType.LaunchOptions().setSlowMo(100).setHeadless(headless);
+			var options1 = new BrowserType.LaunchOptions().setHeadless(headless);
 			var proxyConfig = webClient.getOptions().getProxyConfig();
 			if (proxyConfig != null && proxyConfig.getProxyHost() != null)
 			{
@@ -206,7 +206,8 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			}
 			browser = playwright.chromium().launch(options1);
 
-			var stealthContext = Stealth4j.newStealthContext(browser);
+			var stealthContext = Stealth4j.newStealthContext(browser, new Stealth4jConfig.Builder().navigatorWebDriver(true).chromeLoadTimes(true).chromeApp(true).chromeCsi(true).navigatorPlugins(false).mediaCodecs(false).windowOuterDimensions(true).navigatorUserAgent(true, null).build());
+			stealthContext.setExtraHTTPHeaders(Map.of("DNT", "1"));
 
 			ArrayList<Cookie> pwCookies = new ArrayList<>();
 			if ("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")))
@@ -421,39 +422,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					{
 						log(Level.DEBUG, "Response für Remember: " + response.getHttpStatus() + " - " + response.getContent());
 					}
-					else 
-					{
-						ArrayList<String> cookieNames = new ArrayList<>();
-						var cookiesJSON = new JSONArray();
-						for (var header : response.getResponseHeader())
-						{
-							if ("set-cookie".equals(header.getName().toLowerCase()) && header.getValue().toLowerCase().contains("domain=.americanexpress.com"))
-							{
-								cookieNames.add(header.getValue().replaceAll("=.*", ""));
-							}
-						}
-						for (var name : cookieNames)
-						{
-							var allCookies = stealthContext.cookies();
-							for (var cookie : allCookies)
-							{
-								if (cookie.name.equals(name) && cookie.domain.equals(".americanexpress.com"))
-								{
-									var cookieJSON = new JSONObject();
-									cookieJSON.put("domain", cookie.domain);
-									cookieJSON.put("name", cookie.name);
-									cookieJSON.put("value", cookie.value);
-									cookieJSON.put("path", cookie.path);
-									cookieJSON.put("secure", cookie.secure);
-									cookieJSON.put("httpOnly",  cookie.httpOnly);
-									cookieJSON.put("sameSite", cookie.sameSite);
-									cookiesJSON.put(cookieJSON);
-									break;
-								}
-							}
-						}
-						konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, cookiesJSON.toString());
-					}
 				}
 			}
 			monitor.setPercentComplete(14);
@@ -463,6 +431,25 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				throw new ApplicationException("Login fehlgeschlagen");
 			}
 			monitor.setPercentComplete(15);
+
+			if ("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")))
+			{
+				var cookiesJSON = new JSONArray();
+				var allCookies = stealthContext.cookies();
+				for (var cookie : allCookies)
+				{
+					var cookieJSON = new JSONObject();
+					cookieJSON.put("domain", cookie.domain);
+					cookieJSON.put("name", cookie.name);
+					cookieJSON.put("value", cookie.value);
+					cookieJSON.put("path", cookie.path);
+					cookieJSON.put("secure", cookie.secure);
+					cookieJSON.put("httpOnly",  cookie.httpOnly);
+					cookieJSON.put("sameSite", cookie.sameSite);
+					cookiesJSON.put(cookieJSON);
+				}
+				konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, cookiesJSON.toString());
+			}
 
 			try
 			{
@@ -725,7 +712,16 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		
 		
 		page.onResponse(responseHandler);
-		var result = page.evaluate(js);
+		Object result;
+		try 
+		{
+			result = page.evaluate(js);
+		}
+		catch (PlaywrightException e)
+		{
+			page.waitForLoadState();
+			result = page.evaluate(js);
+		}
 		var resultJSON = new JSONObject(result.toString());
 		page.offResponse(responseHandler);
 
