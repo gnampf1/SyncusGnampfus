@@ -225,8 +225,21 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							newUmsatz.setSaldo(transaction.optJSONObject("balance").optJSONObject("accountingBalance").optDouble("amount"));
 							newUmsatz.setTransactionId(transaction.optString("id"));
 							newUmsatz.setValuta(dateFormat.parse(transaction.optString("valueDate")));
-							newUmsatz.setZweck(transaction.optString("humanConceptName"));
-							newUmsatz.setZweck2(transaction.optString("humanExtendedConceptName"));
+							String zweck = transaction.optString("humanConceptName") + " " +transaction.optString("humanExtendedConceptName");
+							int len = Math.min(35, zweck.length());
+							newUmsatz.setZweck(zweck.substring(0, len));
+							zweck = zweck.substring(len);
+							len = Math.min(35, zweck.length());
+							newUmsatz.setZweck2(zweck.substring(0, len));
+							zweck = zweck.substring(len);
+							ArrayList<String> zwecke = new ArrayList<>();
+							while (zweck.length() > 0)
+							{
+								len = Math.min(35, zweck.length());
+								zwecke.add(zweck.substring(0, len));
+								zweck = zweck.substring(len);
+							}
+							newUmsatz.setWeitereVerwendungszwecke(zwecke.toArray(new String[0]));
 	
 							var detailSourceKey = transaction.optJSONObject("origin").optString("detailSourceKey");
 							var detailSourceId = transaction.optJSONObject("origin").optString("detailSourceId");
