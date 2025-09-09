@@ -30,6 +30,6 @@ Sowohl die Hanseatic-Kreditkarten-Konten als auch die American Express-Konten, d
 
 ## Bekannte Probleme
 - Wenn mehrere Plugins per Rundruf nacheinander abgerufen werden kann es sein das bei einigen Konten kein Rundruf erfolgt, sondern die Meldung kommt es wäre schon ein Rundruf im Gange. Das ist noch ein Problem in Hibiscus selbst. Abhilfe schafft die Konten einzeln abzurufen, was bei BBVA aufgrund des zweiten Faktors eh sinnvoll sein dürfte. Sobald der Fehler einmal auftrat kann das betreffende Konto bis zu einem Neustart nicht mehr abgerufen werden!
-- AMEX wurde nicht mit der App getestet. Kann klappen, muss aber nicht. Mit Email / SMS klappt es aber auch bei registrierter App. 
+- AMEX funktioniert wohl aktuell noch nicht mit der App. Mit Email / SMS klappt es aber auch bei registrierter App. 
 - bei Umstellung von Mashup kann es bei der Hanseaticbank noch einmalig zu Doppeleinträgen kommen
 - Hanseaticbank verlangt alle paar Monate bei der Anmeldung eine SMS-Tan, das Plugin kann die aktuell noch nicht liefern (sondern nur beim Abruf älterer Umsätze). Einfach einmalig per Browser ins Onlinebanking einloggen, dann funktioniert das Plugin wieder
