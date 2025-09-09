@@ -225,22 +225,9 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							newUmsatz.setSaldo(transaction.optJSONObject("balance").optJSONObject("accountingBalance").optDouble("amount"));
 							newUmsatz.setTransactionId(transaction.optString("id"));
 							newUmsatz.setValuta(dateFormat.parse(transaction.optString("valueDate")));
-							String zweck = transaction.optString("humanConceptName") + " " +transaction.optString("humanExtendedConceptName");
-							int len = Math.min(35, zweck.length());
-							newUmsatz.setZweck(zweck.substring(0, len));
-							zweck = zweck.substring(len);
-							len = Math.min(35, zweck.length());
-							newUmsatz.setZweck2(zweck.substring(0, len));
-							zweck = zweck.substring(len);
-							ArrayList<String> zwecke = new ArrayList<>();
-							while (zweck.length() > 0)
-							{
-								len = Math.min(35, zweck.length());
-								zwecke.add(zweck.substring(0, len));
-								zweck = zweck.substring(len);
-							}
-							newUmsatz.setWeitereVerwendungszwecke(zwecke.toArray(new String[0]));
 	
+							var vz = transaction.optString("humanExtendedConceptName");
+							
 							var detailSourceKey = transaction.optJSONObject("origin").optString("detailSourceKey");
 							var detailSourceId = transaction.optJSONObject("origin").optString("detailSourceId");
 							if (detailSourceKey != null && !"".equals(detailSourceKey) && !detailSourceKey.contains(" ") && !"KPSA".equals(detailSourceId))
@@ -271,13 +258,34 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 										newUmsatz.setGegenkontoName(gegenkto.optString("alias"));
 									}
 									newUmsatz.setGegenkontoNummer(gegenkto.optJSONObject("contract").optString("number"));
+									
+									if (details.has("concept"))
+									{
+										vz = details.getString("concept");
+									}
 								}
 								else
 								{
 									log(Level.WARN, "Keine Umsatzdetails, obwohl erwartet. Bitte DetailSourceId = " + detailSourceId + " an gnampf melden");
 								}
 							}
-	
+
+							String zweck = transaction.optString("humanConceptName") + " " + vz;
+							int len = Math.min(35, zweck.length());
+							newUmsatz.setZweck(zweck.substring(0, len));
+							zweck = zweck.substring(len);
+							len = Math.min(35, zweck.length());
+							newUmsatz.setZweck2(zweck.substring(0, len));
+							zweck = zweck.substring(len);
+							ArrayList<String> zwecke = new ArrayList<>();
+							while (zweck.length() > 0)
+							{
+								len = Math.min(35, zweck.length());
+								zwecke.add(zweck.substring(0, len));
+								zweck = zweck.substring(len);
+							}
+							newUmsatz.setWeitereVerwendungszwecke(zwecke.toArray(new String[0]));
+
 							if (getDuplicateById(newUmsatz) != null)
 							{
 								duplikatGefunden.value = true;
