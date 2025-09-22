@@ -1,7 +1,9 @@
 package de.gnampf.syncusgnampfus.amex;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.file.Path;
 import java.rmi.RemoteException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -238,6 +240,33 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				var proxy = proxyConfig.getProxyScheme()+"://" + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort();
 				options1.setProxy(proxy);
 			}
+			
+			var chromePath = konto.getMeta(AMEXSynchronizeBackend.META_CHROMEPATH,  null);
+			if (chromePath != null && !chromePath.isBlank())
+			{
+				var chromeFile = new File(chromePath); 
+				if (chromeFile.isFile())
+				{
+					if (chromeFile.canExecute())
+					{
+						log(Level.INFO, "Verwende Chrome unter " + chromePath);
+						options1 = options1.setExecutablePath(Path.of(chromePath));
+					}
+					else
+					{
+						log(Level.WARN, "Chrome-Pfad auf " + chromePath + " gesetzt, aber Datei nicht ausf\u00FChrbar");
+					}
+				}
+				else
+				{
+					log(Level.WARN, "Chrome-Pfad auf " + chromePath + " gesetzt, aber Datei nicht vorhanden");
+				}
+			}
+			else
+			{
+				log(Level.INFO, "Verwende Chromium von Playwright");
+			}
+			
 			browser = playwright.chromium().launch(options1);
 
 			var stealthContext = Stealth4j.newStealthContext(browser, new Stealth4jConfig.Builder().navigatorWebDriver(true).chromeLoadTimes(true).chromeApp(true).chromeCsi(true).navigatorPlugins(false).mediaCodecs(false).windowOuterDimensions(true).navigatorUserAgent(true, null).build());
@@ -454,7 +483,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					response = doRequest(page, "https://functions.americanexpress.com/CreateTwoFactorAuthenticationForUser.v1", HttpMethod.POST, null, "application/json; charset=UTF-8", "[{\"locale\":\"de-DE\",\"trust\":true,\"deviceName\":\"SyncusGnampfus\"}]", true);
 					if (response.getHttpStatus() != 200)
 					{
-						log(Level.DEBUG, "Response für Remember: " + response.getHttpStatus() + " - " + response.getContent());
+						log(Level.DEBUG, "Response f\u00FCr Remember: " + response.getHttpStatus() + " - " + response.getContent());
 					}
 				}
 			}
