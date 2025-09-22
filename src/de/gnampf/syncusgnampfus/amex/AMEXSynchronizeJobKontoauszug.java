@@ -24,6 +24,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Locator.WaitForOptions;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Page.ScreenshotOptions;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.Request;
@@ -173,7 +174,14 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		int timeout = 600;
 		while (interceptor.Response == null && interceptor.errorCount < 5 && timeout > 0)
 		{
-			pwPage.screenshot();
+			try 
+			{
+				pwPage.screenshot(new ScreenshotOptions().setTimeout(1000));
+			}
+			catch (Exception e)
+			{
+				log(Level.INFO, "Screenshot meldet " + e);
+			}
 			Thread.sleep(100);
 			timeout--;
 		}
@@ -193,7 +201,14 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		pwPage.waitForLoadState();
 		while (!loadFinished.value)
 		{
-			pwPage.screenshot();
+			try 
+			{
+				pwPage.screenshot(new ScreenshotOptions().setTimeout(1000));
+			}
+			catch (Exception e)
+			{
+				log(Level.INFO, "Screenshot meldet " + e);
+			}
 			Thread.sleep(100);
 		}
 		pwPage.unroute("https://functions.americanexpress.com/ReadAuthenticationChallenges.v3");
