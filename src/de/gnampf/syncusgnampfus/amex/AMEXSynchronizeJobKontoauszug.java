@@ -397,11 +397,11 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						question = questionSMS;
 						break;
 					}
-					else if (otpOrder.charAt(i) == 'A' && questionAPP != null)
+					/*else if (otpOrder.charAt(i) == 'A' && questionAPP != null)
 					{
 						question = questionAPP;
 						break;
-					}
+					}*/
 				}
 
 				if (question == null)
@@ -537,7 +537,8 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			catch (Exception e) {}
 
 			var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, null);
-			if (accountToken == null || accountToken.isBlank())
+			String mainToken = null;
+			//if (accountToken == null || accountToken.isBlank())
 			{
 				log(Level.INFO, "Ermittle AccountToken (neue Variante)");
 				try 
@@ -554,6 +555,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					if (initialState != null)
 					{
 						var initialStateText = initialState.toString();
+						log(Level.INFO, "InitialState: " + initialStateText);
 						var initialArray = new JSONArray(initialStateText);
 						var a = initialArray.getJSONArray(1);
 						for (int i = 0; i < a.length(); i++)
@@ -597,6 +599,10 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 																					if (arr != null)
 																					{
 																						var token = h.getString(i - 1);
+																						if (mainToken == null)
+																						{
+																							mainToken = token;
+																						}
 																						for (var j = 0; j < h.length(); j++)
 																						{
 																							if ("account".equals(arr.optString(j)))
@@ -648,12 +654,17 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			}
 			monitor.setPercentComplete(20);
 
+			if (mainToken == null)
+			{
+				mainToken = accountToken;
+			}
+			
 			if (accountToken == null || accountToken.isBlank())
 			{
 				throw new ApplicationException("Konnte kein AccountToken f\u00FCr Karte " + konto.getUnterkonto() + " ermitteln!");
 			}
 			ArrayList<KeyValue<String, String>> header = new ArrayList<>();
-			header.add(new KeyValue<>("account_token", accountToken));
+			header.add(new KeyValue<>("account_token", mainToken));
 
 			var response = doRequest(page, "https://global.americanexpress.com/api/servicing/v1/financials/balances", HttpMethod.GET, header, null, null, true);
 			if (response.getHttpStatus() != 200)
