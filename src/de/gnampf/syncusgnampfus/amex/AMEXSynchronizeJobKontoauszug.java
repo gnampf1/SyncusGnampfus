@@ -21,6 +21,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.Browser.NewContextOptions;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Locator.WaitForOptions;
 import com.microsoft.playwright.Page;
@@ -32,6 +33,8 @@ import com.microsoft.playwright.Response;
 import com.microsoft.playwright.Route.FulfillOptions;
 import com.microsoft.playwright.options.Cookie;
 import com.microsoft.playwright.options.LoadState;
+import com.microsoft.playwright.options.ScreenshotAnimations;
+import com.microsoft.playwright.options.ScreenshotType;
 import com.microsoft.playwright.options.WaitForSelectorState;
 
 import de.gnampf.syncusgnampfus.KeyValue;
@@ -77,6 +80,15 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					{
 						log(Level.WARN, "403 beim Login erhalten");
 						interceptor.errorCount++;
+						if (interceptor.errorCount >= 5)
+						{
+							 pwPage.navigate("https://bot.sannysoft.com/");
+							 pwPage.screenshot(new ScreenshotOptions().setPath(Path.of("/tmp/blubb.png")).setFullPage(true).setType(ScreenshotType.PNG));
+						}
+						else
+						{
+							pwPage.getByTestId("submit-button").click();
+						}
 					}
 					else if (r.status() == 200)
 					{
@@ -91,10 +103,11 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 								permanentHeaders.add(new KeyValue<>(h.name, h.value));
 							}
 						});
+						log(Level.INFO, "Login ok: " + r.text());
 					}
 					else
 					{
-						log(Level.INFO, "Status ist " + r.status() + " f\u00FCr url " + r.url());
+						log(Level.INFO, "Login-Status ist " + r.status() + " f\u00FCr url " + r.url());
 						interceptor.errorCount++;
 					}
 				}
@@ -171,27 +184,27 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		pwPage.getByTestId("password-input").fill(passwort); 
 		pwPage.getByTestId("submit-button").click();
 
+		var scOptions = new ScreenshotOptions().setTimeout(1000).setAnimations(ScreenshotAnimations.DISABLED).setFullPage(false).setOmitBackground(true).setType(ScreenshotType.JPEG);
 		int timeout = 600;
-		while (interceptor.Response == null && interceptor.errorCount < 5 && timeout > 0)
+		while (interceptor.Response == null && interceptor.errorCount < 5 && timeout-- > 0)
 		{
 			try 
 			{
-				pwPage.screenshot(new ScreenshotOptions().setTimeout(1000));
+				pwPage.screenshot(scOptions);
 			}
 			catch (Exception e)
 			{
-				log(Level.INFO, "Screenshot meldet " + e);
+				log(Level.DEBUG, "Screenshot meldet " + e);
 			}
 			Thread.sleep(100);
-			timeout--;
 		}
 
 		if (interceptor.errorCount >= 5)
 		{
-			throw new ApplicationException("Login fehlgeschlagen wegen technischer Probleme");
+			throw new ApplicationException("Login fehlgeschlagen wegen technischer Probleme, bitte nach einigen Stunden erneut probieren");
 		}
 		
-		if (timeout == 0)
+		if (interceptor.Response == null)	
 		{
 			throw new ApplicationException("Timeout beim Ermitteln der CorrelationId");
 		}
@@ -199,15 +212,15 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		pwPage.offResponse(responseHandler);
 		pwPage.offRequestFailed(errorHandler);
 		pwPage.waitForLoadState();
-		while (!loadFinished.value)
+		while (!loadFinished.value && timeout-- > 0)
 		{
 			try 
 			{
-				pwPage.screenshot(new ScreenshotOptions().setTimeout(1000));
+				pwPage.screenshot(scOptions);
 			}
 			catch (Exception e)
 			{
-				log(Level.INFO, "Screenshot meldet " + e);
+				log(Level.DEBUG, "Screenshot meldet " + e);
 			}
 			Thread.sleep(100);
 		}
@@ -326,6 +339,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				log(Level.DEBUG, "Response: " + interceptor.Response.getContent());
 				throw new ApplicationException("Login fehlgeschlagen, Passwort falsch?");
 			}
+			
 			var assessmentToken = reAuth.getString("assessmentToken");
 			if (needLogin)
 			{
@@ -384,7 +398,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 
 				JSONObject question = null;
-				String otpOrder = konto.getMeta(AMEXSynchronizeBackend.META_OTPTYPE, "ESA");
+				String otpOrder = konto.getMeta(AMEXSynchronizeBackend.META_OTPTYPE, "ES");
 				for (int i = 0; i < otpOrder.length(); i++)
 				{
 					if (otpOrder.charAt(i) == 'E' && questionEMAIL != null)
@@ -406,7 +420,8 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 				if (question == null)
 				{
-					throw new ApplicationException("Kein verwendbares OTP-Verfahren gefunden, bitte Einstellungen \u00FCberpr\u00FCfen, empfohlen wir 'ESA', aktuell '" + otpOrder + "'");
+					log(Level.INFO, "2FA-Verfahren: " + response.getContent());
+					throw new ApplicationException("Kein verwendbares OTP-Verfahren gefunden, bitte Einstellungen \u00FCberpr\u00FCfen, empfohlen wird 'ES', aktuell '" + otpOrder + "'");
 				}
 
 				monitor.setPercentComplete(9);
@@ -532,15 +547,15 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			try
 			{
 				page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-				page.navigate("https://global.americanexpress.com/activity/recent?appv5=false");
+				page.navigate("https://global.americanexpress.com/api/servicing/v1/financials/transactions?limit=1000&status=pending&extended_details=merchant");
 			}
 			catch (Exception e) {}
 
 			var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, null);
-			String mainToken = null;
-			//if (accountToken == null || accountToken.isBlank())
+			if (accountToken == null || accountToken.isBlank())
 			{
 				log(Level.INFO, "Ermittle AccountToken (neue Variante)");
+				JSONObject initialStateObj = new JSONObject();
 				try 
 				{
 					var response = doRequest(page, "https://global.americanexpress.com/activity/recent?appv5=false", HttpMethod.GET, null, null, null, true);
@@ -555,92 +570,54 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					if (initialState != null)
 					{
 						var initialStateText = initialState.toString();
-						log(Level.INFO, "InitialState: " + initialStateText);
 						var initialArray = new JSONArray(initialStateText);
-						var a = initialArray.getJSONArray(1);
-						for (int i = 0; i < a.length(); i++)
+						initialStateObj = (JSONObject)TransformStrangeJSON(initialArray);
+						log(Level.DEBUG, "InitialState: " + initialStateObj.toString());
+						
+						var productsList = (JSONObject)initialStateObj.query("/modules/axp-myca-root/products/details/types/CARD_PRODUCT/productsList");
+						for (var key : productsList.keySet())
 						{
-							if ("modules".equals(a.optString(i)))
+							var item = productsList.getJSONObject(key);
+							var cardNo = (String)item.query("/account/display_account_number");
+							if (konto.getUnterkonto().equals(cardNo))
 							{
-								var b = a.getJSONArray(i+1).getJSONArray(1);
-								for (i = 0; i < b.length(); i++)
+								accountToken = item.getString("account_token");
+								var supp = item.getJSONObject("_flags").optBoolean("isSupp");
+								if (supp)
 								{
-									if ("axp-myca-root".equals(b.optString(i)))
+									String mainToken = null;
+									for (var mainKey : productsList.keySet())
 									{
-										var c = b.getJSONArray(i+1).getJSONArray(1);
-										for (i = 0; i < c.length(); i++)
+										var mainItem = productsList.getJSONObject(mainKey);
+										var suppAccounts = mainItem.optJSONArray("supplementary_accounts");
+										if (suppAccounts != null)
 										{
-											if ("products".equals(c.optString(i)))
+											for (var subAccount : suppAccounts)
 											{
-												var d = c.getJSONArray(i+1).getJSONArray(1);
-												for (i = 0; i < d.length(); i++)
+												if (accountToken.equals((String)subAccount))
 												{
-													if ("details".equals(d.optString(i)))
-													{
-														var e = d.getJSONArray(i+1).getJSONArray(1);
-														for (i = 0; i < e.length(); i++)
-														{
-															if ("types".equals(e.optString(i))) 
-															{
-																var f = e.getJSONArray(i+1).getJSONArray(1);
-																for (i = 0; i < f.length(); i++)
-																{
-																	if ("CARD_PRODUCT".equals(f.optString(i))) 
-																	{
-																		var g = f.getJSONArray(i+1);
-																		for (i = 0; i < g.length(); i++)
-																		{
-																			if ("productsList".equals(g.optString(i)))
-																			{
-																				var h = g.getJSONArray(i+1);
-																				for (i = 0; i < h.length(); i++)
-																				{
-																					var arr = h.optJSONArray(i); 
-																					if (arr != null)
-																					{
-																						var token = h.getString(i - 1);
-																						if (mainToken == null)
-																						{
-																							mainToken = token;
-																						}
-																						for (var j = 0; j < h.length(); j++)
-																						{
-																							if ("account".equals(arr.optString(j)))
-																							{
-																								var accArr = arr.getJSONArray(j+1);
-																								for (j = 0; j < accArr.length(); j++) 
-																								{
-																									if ("display_account_number".equals(accArr.optString(j)) && konto.getUnterkonto().equals(accArr.optString(j + 1)))
-																									{
-																										konto.setMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, token);
-																										accountToken = token;
-																										break;
-																									}
-																								}
-																								break;
-																							}
-																						}
-																					}
-																				}
-																				break;
-																			}
-																		}
-																		break;
-																	}
-																}
-																break;
-															}
-														}
-														break;
-													}
+													mainToken = mainItem.getString("account_token");
+													break;
 												}
-												break;
 											}
 										}
-										break;
+										if (mainToken != null) break;
+									}
+									if (mainToken != null)
+									{
+										log(Level.INFO,"AccountToken: " + mainToken + ", SubToken: " + accountToken);
+										accountToken = mainToken;
+									}
+									else 
+									{
+										log(Level.WARN, "Konnto AccountToken für Hauptkarte nicht ermitteln");
 									}
 								}
-								
+								else
+								{
+									log(Level.INFO,"AccountToken: " + accountToken);
+								}
+								konto.setMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, accountToken);
 								break;
 							}
 						}
@@ -648,23 +625,18 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 				catch (Exception e)
 				{
-					log(Level.ERROR, "Ermittlung AccountToken fehlgeschlagen: " + e);
+					log(Level.ERROR, "Ermittlung AccountToken fehlgeschlagen: " + e + "\nInitialState: " + initialStateObj.toString());
 					accountToken = null;
 				}
 			}
 			monitor.setPercentComplete(20);
 
-			if (mainToken == null)
-			{
-				mainToken = accountToken;
-			}
-			
 			if (accountToken == null || accountToken.isBlank())
 			{
 				throw new ApplicationException("Konnte kein AccountToken f\u00FCr Karte " + konto.getUnterkonto() + " ermitteln!");
 			}
 			ArrayList<KeyValue<String, String>> header = new ArrayList<>();
-			header.add(new KeyValue<>("account_token", mainToken));
+			header.add(new KeyValue<>("account_token", accountToken));
 
 			var response = doRequest(page, "https://global.americanexpress.com/api/servicing/v1/financials/balances", HttpMethod.GET, header, null, null, true);
 			if (response.getHttpStatus() != 200)
@@ -743,6 +715,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		{
 			if (page != null) 
 			{
+				page.navigate("https://global.americanexpress.com/api/servicing/v1/financials/transactions?limit=1000&status=pending&extended_details=merchant");
 				doRequest(page, "https://functions.americanexpress.com/DeleteUserSession.v1", HttpMethod.GET, null, null, null, true);
 				page.close();
 			}
@@ -754,84 +727,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		return true;
 	}
 	
-	protected WebResult doRequest(Page page, String url, HttpMethod method, List<KeyValue<String,String>> headers, String contentType, String data, boolean retry) throws URISyntaxException, org.htmlunit.FailingHttpStatusCodeException, IOException, ApplicationException
-	{
-		var responseObj = new Object() { public List<NameValuePair> header = null; };
-		var responseHandler = new Consumer<Response>() 
-		{
-			@Override
-			public void accept(Response r) 
-			{
-				if (r.url().equals(url) && method.toString().equals(r.request().method()))
-				{
-					ArrayList<NameValuePair> headers = new ArrayList<>();
-					r.headersArray().forEach(h -> 
-					{
-						headers.add(new NameValuePair(h.name, h.value));
-					});
-					responseObj.header = headers;
-				}
-			}
-		};
-		
-
-		var js = "fetch(\""+url+"\", { method: \"" + method + "\", ";
-		if (data != null)
-		{
-			js += "body: \"" + data.replace("\"", "\\\"") + "\", ";
-		}
-		js += "headers: {";
-		if (headers != null)
-		{
-			for (var header : headers)			
-			{		
-				js += "\"" + header.getKey() + "\": \"" +  header.getValue().replace("\"", "\\\"") + "\", ";
-			}
-		}
-		for (var header : permanentHeaders)			
-		{		
-			js += "\"" + header.getKey() + "\": \"" +  header.getValue().replace("\"", "\\\"") + "\", ";
-		}
-		js += "\"Accept\": \"*/*\"";
-		if (contentType != null)
-		{
-			js += ", \"Content-Type\": \"" + contentType.replace("\"", "\\\"") + "\"";
-		}
-		js += "}, \"mode\": \"cors\", \"credentials\": \"include\"}).then((ret) => { window.s = ret.status; return ret.text(); }, (ret) => { window.s = 500; return \"Unhandled Exception: \" + ret; }).then((text) => { return \"{\\\"status\\\":\" + window.s + \", \\\"body\\\": \" + JSON.stringify(text) + \"}\"; })";
-		
-		
-		page.onResponse(responseHandler);
-		Object result;
-		try 
-		{
-			result = page.evaluate(js);
-		}
-		catch (PlaywrightException e)
-		{
-			page.waitForLoadState();
-			result = page.evaluate(js);
-		}
-		var resultJSON = new JSONObject(result.toString());
-		page.offResponse(responseHandler);
-
-		try
-		{
-			return new WebResult(resultJSON.getInt("status"), resultJSON.getString("body"), responseObj.header, null);
-		}
-		catch (Exception e)
-		{
-			if (retry)
-			{
-				return doRequest(page, url, method, headers, contentType, data, retry);
-			}
-			else
-			{
-				log(Level.ERROR, "Fehler bei URL " + url + ", Antwort: " + result.toString());			
-				throw e;
-			}
-		}
-	}
-
 	private class SaldoContainer 
 	{
 		public Double value;
@@ -840,14 +735,13 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 	private ArrayList<Umsatz> processTransactions(Konto konto, ArrayList<Umsatz> neueUmsaetze, DBIterator<Umsatz> vorhandeneUmsaetze, JSONArray transactions, boolean pending, SaldoContainer saldo) throws RemoteException, ParseException, ApplicationException
 	{
-		var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, "");
 		var kontoNr = konto.getUnterkonto();
 		var duplikate = new ArrayList<Umsatz>();
 		
 		for (var transObj : transactions)
 		{
 			var transaction = (JSONObject)transObj;
-			if (accountToken.equals(transaction.optString("account_token")) && kontoNr.equals(transaction.optString("display_account_number")))
+			if (kontoNr.equals(transaction.optString("display_account_number")))
 			{
 				var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
 				newUmsatz.setKonto(konto);
@@ -900,5 +794,74 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			}
 		}
 		return duplikate;
+	}
+	
+	public Object TransformStrangeJSON(JSONArray source)
+	{
+		var ret = new JSONObject();
+		var rootString = source.optString(0);
+		var rootArray = source.optJSONArray(0);
+		if (rootArray != null)
+		{
+			var valueArray = source.getJSONArray(0);
+			return TransformStrangeJSON(valueArray);
+		} 
+		else if ("^ ".equals(rootString))
+		{
+			for (int i = 1; i < source.length(); i+= 2)
+			{
+				var key = source.getString(i);
+				var valueObj = source.optJSONArray(i+1);
+				if (valueObj != null)
+				{
+					ret.put(key,  TransformStrangeJSON(valueObj));
+				}
+				else
+				{
+					ret.put(key, source.get(i+1));
+				}
+			}
+		}
+		else if ("~#iM".equals(rootString))
+		{
+			var valueArray = source.getJSONArray(1);
+			for (int i = 0; i < valueArray.length(); i+= 2)
+			{
+				var key = valueArray.getString(i);
+				var valueObj = valueArray.optJSONArray(i+1);
+				if (valueObj != null)
+				{
+					ret.put(key,  TransformStrangeJSON(valueObj));
+				}
+				else
+				{
+					ret.put(key, valueArray.get(i+1));
+				}
+			}
+		}
+		else if ("~#iL".equals(rootString))
+		{
+			JSONArray arr = new JSONArray();
+			var lArr = source.getJSONArray(1);
+			for (int i = 0; i < lArr.length(); i++)
+			{
+				var subArr = lArr.optJSONArray(i);
+				if (subArr != null)
+				{
+					arr.put(TransformStrangeJSON(subArr));
+				}
+				else
+				{
+					arr.put(lArr.get(i));
+				}
+			}
+			return arr;
+		}
+		else if (rootString != null)
+		{
+			return source;
+		}
+			
+		return ret;
 	}
 }
