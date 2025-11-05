@@ -11,7 +11,7 @@ import de.willuhn.jameica.hbci.rmi.Konto;
 @Lifecycle(Type.CONTEXT)
 public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 {
-	public final static String META_OTPTYPE = "OTP-Reihenfolge, E=EMAIL, S=SMS, A=App";
+	public final static String META_OTPTYPE = "OTP-Reihenfolge, E=EMAIL, S=SMS";
 	public final static String META_NOTHEADLESS = "Browser beim Ermitteln CorrelationId anzeigen";
 	public final static String META_DEVICECOOKIES = "DeviceCookies";
 	public final static String META_ACCOUNTTOKEN = "AccountToken";
@@ -38,7 +38,7 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			}
 			if (konto.getMeta(META_OTPTYPE, null) == null)
 			{
-				konto.setMeta(META_OTPTYPE, "ESA");
+				konto.setMeta(META_OTPTYPE, "ES");
 			}
 			if (konto.getMeta(META_NOTHEADLESS,  null) == null)
 			{

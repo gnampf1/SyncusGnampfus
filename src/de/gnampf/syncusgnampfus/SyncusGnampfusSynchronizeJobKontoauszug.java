@@ -11,6 +11,7 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.htmlunit.CookieManager;
 import org.htmlunit.FailingHttpStatusCodeException;
@@ -19,6 +20,12 @@ import org.htmlunit.Page;
 import org.htmlunit.ProxyConfig;
 import org.htmlunit.WebClient;
 import org.htmlunit.WebRequest;
+import org.htmlunit.util.NameValuePair;
+import org.json.JSONObject;
+
+import com.microsoft.playwright.PlaywrightException;
+import com.microsoft.playwright.Response;
+
 import de.willuhn.datasource.rmi.DBIterator;
 import de.willuhn.jameica.hbci.SynchronizeOptions;
 import de.willuhn.jameica.hbci.messaging.ImportMessage;
@@ -166,10 +173,19 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 				log(Level.INFO, "Kein Saldodatum, forciere Abruf aller Ums\u00E4tze!");
 			}
 			
-			if (process(konto, fetchSaldo, fetchUmsatz, forceAll, umsaetze, user, passwort))
+			try 
 			{
-				if (cachePins) { passwortHashtable.put(walletAlias, passwort); }
-				if (storePins) { wallet.set(walletAlias, passwort); }
+				if (process(konto, fetchSaldo, fetchUmsatz, forceAll, umsaetze, user, passwort))
+				{
+					if (cachePins) { passwortHashtable.put(walletAlias, passwort); }
+					if (storePins) { wallet.set(walletAlias, passwort); }
+				}
+			}
+			catch (ApplicationException e) 
+			{
+				passwortHashtable.remove(walletAlias); 
+				wallet.set(walletAlias, null); 
+				throw e;
 			}
 		}
 		finally
@@ -390,6 +406,84 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			var response = page.getWebResponse();
 			var text = response.getContentAsString(utf8);
 			return new WebResult(response.getStatusCode(), text, response.getResponseHeaders(), page);
+		}
+	}
+
+	protected WebResult doRequest(com.microsoft.playwright.Page page, String url, HttpMethod method, List<KeyValue<String,String>> headers, String contentType, String data, boolean retry) throws URISyntaxException, org.htmlunit.FailingHttpStatusCodeException, IOException, ApplicationException
+	{
+		var responseObj = new Object() { public List<NameValuePair> header = null; };
+		var responseHandler = new Consumer<Response>() 
+		{
+			@Override
+			public void accept(Response r) 
+			{
+				if (r.url().equals(url) && method.toString().equals(r.request().method()))
+				{
+					ArrayList<NameValuePair> headers = new ArrayList<>();
+					r.headersArray().forEach(h -> 
+					{
+						headers.add(new NameValuePair(h.name, h.value));
+					});
+					responseObj.header = headers;
+				}
+			}
+		};
+		
+
+		var js = "fetch(\""+url+"\", { method: \"" + method + "\", ";
+		if (data != null)
+		{
+			js += "body: \"" + data.replace("\"", "\\\"") + "\", ";
+		}
+		js += "headers: {";
+		if (headers != null)
+		{
+			for (var header : headers)			
+			{		
+				js += "\"" + header.getKey() + "\": \"" +  header.getValue().replace("\"", "\\\"") + "\", ";
+			}
+		}
+		for (var header : permanentHeaders)			
+		{		
+			js += "\"" + header.getKey() + "\": \"" +  header.getValue().replace("\"", "\\\"") + "\", ";
+		}
+		js += "\"Accept\": \"*/*\"";
+		if (contentType != null)
+		{
+			js += ", \"Content-Type\": \"" + contentType.replace("\"", "\\\"") + "\"";
+		}
+		js += "}, \"mode\": \"cors\", \"credentials\": \"include\"}).then((ret) => { window.s = ret.status; return ret.text(); }, (ret) => { window.s = 500; return \"Unhandled Exception: \" + ret; }).then((text) => { return \"{\\\"status\\\":\" + window.s + \", \\\"body\\\": \" + JSON.stringify(text) + \"}\"; })";
+		
+		
+		page.onResponse(responseHandler);
+		Object result;
+		try 
+		{
+			result = page.evaluate(js);
+		}
+		catch (PlaywrightException e)
+		{
+			page.waitForLoadState();
+			result = page.evaluate(js);
+		}
+		var resultJSON = new JSONObject(result.toString());
+		page.offResponse(responseHandler);
+
+		try
+		{
+			return new WebResult(resultJSON.getInt("status"), resultJSON.getString("body"), responseObj.header, null);
+		}
+		catch (Exception e)
+		{
+			if (retry)
+			{
+				return doRequest(page, url, method, headers, contentType, data, retry);
+			}
+			else
+			{
+				log(Level.ERROR, "Fehler bei URL " + url + ", Antwort: " + result.toString());			
+				throw e;
+			}
 		}
 	}
 }
