@@ -1,10 +1,16 @@
 package de.gnampf.syncusgnampfus.bbva;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.nio.file.Path;
 import java.rmi.RemoteException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
+import java.util.List;
+import java.util.Map;
 import java.util.TimeZone;
+import java.util.UUID;
 
 import javax.annotation.Resource;
 
@@ -12,10 +18,19 @@ import org.htmlunit.HttpMethod;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.Browser.NewContextOptions;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.Page.ScreenshotOptions;
+import com.microsoft.playwright.Route.FulfillOptions;
+import com.microsoft.playwright.options.ScreenshotAnimations;
+import com.microsoft.playwright.options.ScreenshotType;
 import de.gnampf.syncusgnampfus.KeyValue;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJob;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobKontoauszug;
 import de.gnampf.syncusgnampfus.WebResult;
+import de.gnampf.syncusgnampfus.amex.AMEXSynchronizeBackend;
 import de.willuhn.datasource.rmi.DBIterator;
 import de.willuhn.jameica.hbci.Settings;
 import de.willuhn.jameica.hbci.messaging.SaldoMessage;
@@ -26,6 +41,8 @@ import de.willuhn.jameica.system.Application;
 import de.willuhn.logging.Level;
 import de.willuhn.logging.Logger;
 import de.willuhn.util.ApplicationException;
+import io.github.kihdev.playwright.stealth4j.Stealth4j;
+import io.github.kihdev.playwright.stealth4j.Stealth4jConfig;
 
 public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {
@@ -34,22 +51,167 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 	protected SynchronizeBackend getBackend() { return backend; }
 	
+	protected void fetchPermanentHeaders(Konto konto) throws RemoteException, InterruptedException
+	{
+		var headerText = new Object() { public String value = konto.getMeta(BBVASynchronizeBackend.META_HEADERS, ""); };
+		if ("".equals(headerText.value))
+		{
+			com.microsoft.playwright.Page pwPage = null;
+			Browser browser = null;
+			try 
+			{
+				Playwright playwright = Playwright.create(); 
+				var headless = "false".equals(konto.getMeta(BBVASynchronizeBackend.META_NOTHEADLESS, "false"));
+				var options1 = new BrowserType.LaunchOptions().setHeadless(headless);
+				var proxyConfig = webClient.getOptions().getProxyConfig();
+				if (proxyConfig != null && proxyConfig.getProxyHost() != null)
+				{
+					var proxy = proxyConfig.getProxyScheme()+"://" + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort();
+					options1.setProxy(proxy);
+				}
+				
+				var ffPath = konto.getMeta(AMEXSynchronizeBackend.META_FIREFOXPATH,  null);
+				if (ffPath != null && !ffPath.isBlank())
+				{
+					var ffFile = new File(ffPath); 
+					if (ffFile.isFile())
+					{
+						if (ffFile.canExecute())
+						{
+							log(Level.INFO, "Verwende Firefox unter " + ffPath);
+							options1 = options1.setExecutablePath(Path.of(ffPath));
+						}
+						else
+						{
+							log(Level.WARN, "Firefox-Pfad auf " + ffPath + " gesetzt, aber Datei nicht ausf\u00FChrbar");
+						}
+					}
+					else
+					{
+						log(Level.WARN, "Firefox-Pfad auf " + ffPath + " gesetzt, aber Datei nicht vorhanden");
+					}
+				}
+				else
+				{
+					log(Level.INFO, "Verwende Firefox von Playwright");
+				}
+				
+				browser = playwright.firefox().launch(options1);
+
+				var stealthContext = Stealth4j.newStealthContext(browser, Stealth4jConfig.builder().navigatorLanguages(true, List.of("de-DE", "de")).build());
+				stealthContext.setExtraHTTPHeaders(Map.of("DNT", "1"));
+				pwPage = stealthContext.newPage();
+
+				pwPage.navigate("https://mobile.bbva.de");
+
+				var loadFinished = new Object() 
+				{
+					public boolean found = false; 				
+				};
+				pwPage.route("https://de-mobi.bbva.com/TechArchitecture/grantingTickets/V02", route -> 
+				{
+					log(Level.INFO, "V02 called");
+					if ("POST".equals(route.request().method()))
+					{
+						loadFinished.found = true;
+						log(Level.INFO, "V02 called, load finished");
+						
+						var header = route.request().headers();
+						var m = Map.of(
+								"akamai-bm-telemetry", header.get("akamai-bm-telemetry"),
+								"bbva-user-agent", header.get("bbva-user-agent"),
+								"contactid", header.get("contactid"),
+								"thirdparty-deviceid", header.get("thirdparty-deviceid"),
+								"user-agent", header.getOrDefault("User-Agent", header.getOrDefault("user-agent", ""))
+								);
+						var j = new JSONObject(m);
+						headerText.value = j.toString();
+						try 
+						{
+							konto.setMeta(BBVASynchronizeBackend.META_HEADERS, headerText.value);
+						}
+						catch (RemoteException e) 
+						{
+						}
+						
+						log(Level.INFO, "Header: " + header.get("akamai-bm-telemetry"));
+					}
+					
+					if (loadFinished.found)
+					{
+						route.fulfill(new FulfillOptions().setBody("Ende").setStatus(200));
+					}
+					else
+					{
+						route.resume();
+					}
+				});
+
+				pwPage.locator("xpath=//input[@type='text']").fill(UUID.randomUUID().toString());
+				pwPage.locator("xpath=//input[@type='password']").fill(UUID.randomUUID().toString());
+				pwPage.locator("xpath=//button[@type='submit']").click();
+				
+				var scOptions = new ScreenshotOptions().setTimeout(1000).setAnimations(ScreenshotAnimations.DISABLED).setFullPage(false).setOmitBackground(true).setType(ScreenshotType.JPEG);
+				int timeout = 600;
+				while (loadFinished.found == false && timeout-- > 0)
+				{
+					try 
+					{
+						pwPage.screenshot(scOptions);
+					}
+					catch (Exception e)
+					{
+						log(Level.DEBUG, "Screenshot meldet " + e);
+					}
+					Thread.sleep(100);
+				}
+			}
+			finally
+			{
+				if (pwPage != null) pwPage.close();
+				if (browser != null) browser.close();
+			}
+		}
+		var headerObj = new JSONObject(headerText.value);
+		permanentHeaders.clear();
+		headerObj.toMap().forEach((x,y) -> { permanentHeaders.add(new KeyValue<>(x,y.toString())); });
+	}
+
 	/**
 	 * @see org.jameica.hibiscus.sync.example.ExampleSynchronizeJob#execute()
 	 */
 	@Override
 	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
-		ArrayList<KeyValue<String, String>> headers = new ArrayList<>();
-		try 
+		fetchPermanentHeaders(konto);
+		
+		var headers = new ArrayList<KeyValue<String, String>>();
+		try
 		{
-			WebResult response = doRequest("https://de-net.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.POST, null, "application/json", "{\"authentication\":{\"consumerID\":\"00000366\",\"authenticationType\":\"121\",\"userID\":\"" + user +"\",\"authenticationData\":[{\"authenticationData\":[\"" + passwort + "\"],\"idAuthenticationData\":\"password\"}]}}");
-			var json = response.getJSONObject();
+			WebResult response;
+			JSONObject json;
+			try 
+			{
+				response = doRequest("https://de-mobi.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.POST, null, "application/json", "{\"authentication\":{\"consumerID\":\"00000363\",\"authenticationType\":\"02\",\"userID\":\"" + user.toUpperCase() +"\",\"authenticationData\":[{\"authenticationData\":[\"" + passwort + "\"],\"idAuthenticationData\":\"password\"}]}}");
+				json = response.getJSONObject();
+				if (response.getHttpStatus() == 403 || "{}".equals(json.toString()))
+				{
+					throw new Exception();
+				}
+			}
+			catch (Exception e)
+			{
+				konto.setMeta(BBVASynchronizeBackend.META_HEADERS, "");
+				fetchPermanentHeaders(konto);
+				response = doRequest("https://de-mobi.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.POST, null, "application/json", "{\"authentication\":{\"consumerID\":\"00000363\",\"authenticationType\":\"02\",\"userID\":\"" + user.toUpperCase() +"\",\"authenticationData\":[{\"authenticationData\":[\"" + passwort + "\"],\"idAuthenticationData\":\"password\"}]}}");
+				json = response.getJSONObject();
+			}
+
 			var authState = json.optString("authenticationState");
 			if ("GO_ON".equals(authState))
 			{
 				var multistepProcessId = json.optString("multistepProcessId");
-				response = doRequest("https://de-net.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.POST, null, "application/json", "{\"authentication\":{\"consumerID\":\"00000366\",\"authenticationType\":\"121\",\"userID\":\"" + user +"\",\"multistepProcessId\":\""+ multistepProcessId + "\"}}");
+				response = doRequest("https://de-mobi.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.POST, null, "application/json", "{\"authentication\":{\"consumerID\":\"00000363\",\"authenticationType\":\"02\",\"userID\":\"" + user.toUpperCase() +"\",\"multistepProcessId\":\""+ multistepProcessId + "\"}}");
 				json = response.getJSONObject();
 				authState = json.optString("authenticationState");
 				if ("GO_ON".equals(authState))
@@ -68,7 +230,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					while (otp.length() != 6);
 
 					headers.add(new KeyValue<>("authenticationstate", multistepProcessId));
-					response = doRequest("https://de-net.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.POST, headers, "application/json", "{\"authentication\":{\"consumerID\":\"00000366\",\"authenticationType\":\"121\",\"userID\":\"" + user +"\",\"multistepProcessId\":\"" + multistepProcessId + "\",\"authenticationData\":[{\"authenticationData\":[\"" + otp + "\"],\"idAuthenticationData\":\"otp\"}]}}");
+					response = doRequest("https://de-mobi.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.POST, headers, "application/json", "{\"authentication\":{\"consumerID\":\"00000363\",\"authenticationType\":\"02\",\"userID\":\"" + user.toUpperCase() +"\",\"multistepProcessId\":\"" + multistepProcessId + "\",\"authenticationData\":[{\"authenticationData\":[\"" + otp + "\"],\"idAuthenticationData\":\"otp\"}]}}");
 					json = response.getJSONObject();
 					authState = json.optString("authenticationState");
 				}
@@ -100,6 +262,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				if ("tsec".equals(header.getName()))
 				{
 					tsec = header.getValue();
+					break;
 				}
 			}
 			headers.add(new KeyValue<>("tsec", tsec));
@@ -117,7 +280,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			response = doRequest("https://de-net.bbva.com/financial-overview/v1/financial-overview?customer.id=" + personId + "&showSicav=false&showPending=true", HttpMethod.GET, headers, null, null);
 			JSONArray contracts = response.getJSONObject().optJSONObject("data").optJSONArray("contracts");
-			var ktoContract = new Object() { JSONObject value = null; };
+			var contractDetails = new Object() { JSONObject ktoContract = null;  JSONObject availableBalance = null; JSONObject currentBalance = null;  };
 			var myIban = konto.getIban();
 			contracts.forEach(c -> 
 			{
@@ -127,41 +290,42 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					var format = (JSONObject)f;
 					if ("IBAN".equals(format.optJSONObject("numberType").optString("id")) && myIban.equals(format.optString("number")))
 					{
-						ktoContract.value = contract;
+						contractDetails.ktoContract = contract;
+						((JSONArray)contract.query("/detail/specificAmounts")).forEach(a ->
+						{
+							var amountObj = (JSONObject)a;
+							switch (amountObj.optString("id"))
+							{
+							case "availableBalance":
+								contractDetails.availableBalance = new JSONObject(Map.of(
+										"amount", amountObj.query("/amounts/0/amount"),
+										"currency", new JSONObject(Map.of("id", amountObj.query("/amounts/0/currency")))
+										));
+								break;
+							case "currentBalance":
+								contractDetails.currentBalance = new JSONObject(Map.of(
+										"amount", amountObj.query("/amounts/0/amount"),
+										"currency", new JSONObject(Map.of("id", amountObj.query("/amounts/0/currency")))
+										));
+								break;
+							}
+						});
 					}
 				});
 			});
 
-			if (ktoContract.value == null)
+			if (contractDetails.ktoContract == null)
 			{
 				log(Level.DEBUG, "Response: " + response.getContent());
 				throw new ApplicationException("Konto mit IBAN " + konto.getIban() + " nicht gefunden!");
 			}
 
-			var contractId = ktoContract.value.optString("id");
+			var contractId = contractDetails.ktoContract.optString("id");
 
 			if (fetchSaldo)
 			{
-				ktoContract.value.optJSONObject("detail").optJSONArray("specificAmounts").forEach(sa ->
-				{
-					var specificAmounts = (JSONObject)sa;
-					double saldo = specificAmounts.getJSONArray("amounts").getJSONObject(0).optDouble("amount");
-					try 
-					{
-						if ("availableBalance".equals(specificAmounts.optString("id")))
-						{
-							konto.setSaldoAvailable(saldo);
-						}
-						else if ("currentBalance".equals(specificAmounts.optString("id")))
-						{
-							konto.setSaldo(saldo);
-						}
-					}
-					catch (RemoteException ex) 
-					{            	
-						log(Level.ERROR, "Fehler beim Setzen vom Saldo: " + ex.toString());
-					}
-				});
+				konto.setSaldoAvailable(contractDetails.availableBalance.optDouble("amount"));
+				konto.setSaldo(contractDetails.currentBalance.optDouble("amount"));
 
 				response = doRequest("https://de-net.bbva.com/accounts/v0/accounts/" + contractId + "/dispokredits/validations/", HttpMethod.GET, headers, null, null);
 				JSONObject dispo = response.getJSONObject().optJSONObject("data");
@@ -197,7 +361,19 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			var duplikatGefunden = new Object() { boolean value = false; };
 			do 
 			{
-				response = doRequest(webClient, "https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=" + page, HttpMethod.POST, headers, "application/json", "{\"accountContracts\":[{\"contract\":{\"id\":\"" + contractId + "\"}}],\"customer\":{\"id\":\"" + personId + "\"},\"filter\":{\"dates\":{\"from\":\"2025-05-01T00:00:00.000Z\",\"to\":\"" + dateFormat.format(new Date()) + "\"},\"operationType\":[\"BOTH\"]},\"orderField\":\"DATE_FIELD\",\"orderType\":\"DESC_ORDER\",\"searchType\":\"SEARCH\"}");
+				json = new JSONObject(Map.of(
+						"customer", new JSONObject(Map.of("id", personId)),
+						"searchType", "SEARCH",
+						"accountContracts", new JSONArray(List.of(new JSONObject(Map.of(
+								"contract", new JSONObject(Map.of("id", contractId)),
+								"account", new JSONObject(Map.of(
+										"currentBalance", contractDetails.currentBalance,
+										"availableBalance", contractDetails.availableBalance
+										))
+						))))
+					));
+
+				response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=" + page, HttpMethod.POST, headers, "application/json", json.toString());
 				json = response.getJSONObject();
 				var pagination = json.optJSONObject("pagination");
 				if (pagination != null && pagination.has("numPages"))
@@ -315,7 +491,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			// Logout
 			try 
 			{
-				doRequest("https://de-net.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.DELETE, headers, null, null);
+				doRequest("https://de-mobi.bbva.com/TechArchitecture/grantingTickets/V02", HttpMethod.DELETE, headers, null, null);
 			}
 			catch (Exception e) {}
 		}

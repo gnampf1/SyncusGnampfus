@@ -16,7 +16,7 @@ Konten müssen von Hand angelegt werden, dafür unter **Konten** auf **Konto man
 
 ### American Express
 hier muss nur die Kundenkennung mit dem Benutzernamen fürs Onlinebanking gefüllt, bei Unterkontonummer die letzten 5 Ziffern der Kreditkarte eingegeben werden (oder die ganze Kreditkartennummer) und im Dropdown **Zugangsweg** *AMEX* ausgewählt werden. Die restlichen Felder können frei vergeben werden.<BR>
-In den Synchronisationsoptionen des Kontos kann für die "TAN-Verfahren" eine Reihenfolge vergeben werden. Das erste gefundene Verfahren wird dann verwendet. Standard ist *ESA* für erst Email, dann SMS, dann App (ja, ich kann Banking-Apps nicht leiden!). Durch Umstellen der Buchstaben sind andere Prios möglich.<BR>
+In den Synchronisationsoptionen des Kontos kann für die "TAN-Verfahren" eine Reihenfolge vergeben werden. Das erste gefundene Verfahren wird dann verwendet. Standard ist *ES* für erst Email, dann SMS. Durch Umstellen der Buchstaben sind andere Prios möglich.<BR>
 In den Synchronisationsoptionen kann außerdem eingestellt werden, ob das Plugin sich als vertrauenswürdiges Gerät bei AMEX registriert. In dem Fall ist nicht bei jedem Umsatzabruf die Eingabe des zweiten Faktor nötig. Standard ist ja.
 
 ### Hanseatic Bank
@@ -29,7 +29,7 @@ Kundenkennung muss hier dem Benutzernamen fürs Onlinebanking entsprechen, IBAN 
 Sowohl die Hanseatic-Kreditkarten-Konten als auch die American Express-Konten, die mit Mashup angelegt wurden, können weiter verwendet werden. Dazu in den Einstellungen vom Konto die Zugangsart von *non-HBCI (Hibiscus-Mashup)* auf *AMEX* bzw. *HanseaticBank* ändern.
 
 ## Bekannte Probleme
-- Wenn mehrere Plugins per Rundruf nacheinander abgerufen werden kann es sein das bei einigen Konten kein Rundruf erfolgt, sondern die Meldung kommt es wäre schon ein Rundruf im Gange. Das ist noch ein Problem in Hibiscus selbst. Abhilfe schafft die Konten einzeln abzurufen, was bei BBVA aufgrund des zweiten Faktors eh sinnvoll sein dürfte. Sobald der Fehler einmal auftrat kann das betreffende Konto bis zu einem Neustart nicht mehr abgerufen werden!
-- AMEX funktioniert wohl aktuell noch nicht mit der App. Mit Email / SMS klappt es aber auch bei registrierter App. 
+- AMEX funktioniert aktuell noch nicht mit der App. Mit Email / SMS klappt es aber auch bei registrierter App. 
 - bei Umstellung von Mashup kann es bei der Hanseaticbank noch einmalig zu Doppeleinträgen kommen
 - Hanseaticbank verlangt alle paar Monate bei der Anmeldung eine SMS-Tan, das Plugin kann die aktuell noch nicht liefern (sondern nur beim Abruf älterer Umsätze). Einfach einmalig per Browser ins Onlinebanking einloggen, dann funktioniert das Plugin wieder
+- Wenn AMEX **Login fehlgeschlagen wegen technischer Probleme, bitte nach einigen Stunden erneut probieren** meldet, dann hat der Abwehrmechanismus gegriffen. Hier dann am nächsten Tag (oder nach mehreren Stunden) nochmal probieren. Das Problem tritt auf, wenn zu viele Abfragen innerhalb zu kurzer Zeit getätigt werden (hier hilft dann AMEX einfach eine Zeit in Ruhe zu lassen), oder wenn AMEX mal wieder seine Erkennungsroutinen nachgeschärft hat (hier helfen dann nur Code-Anpassungen). Ggf. hilft auch das Anzeigen des Browsers in den Synchronisierungsoptionen

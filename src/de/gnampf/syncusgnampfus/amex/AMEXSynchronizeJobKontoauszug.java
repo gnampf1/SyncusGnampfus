@@ -80,15 +80,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					{
 						log(Level.WARN, "403 beim Login erhalten");
 						interceptor.errorCount++;
-						if (interceptor.errorCount >= 5)
-						{
-							 pwPage.navigate("https://bot.sannysoft.com/");
-							 pwPage.screenshot(new ScreenshotOptions().setPath(Path.of("/tmp/blubb.png")).setFullPage(true).setType(ScreenshotType.PNG));
-						}
-						else
-						{
-							pwPage.getByTestId("submit-button").click();
-						}
 					}
 					else if (r.status() == 200)
 					{
@@ -201,7 +192,12 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 		if (interceptor.errorCount >= 5)
 		{
+			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "" + (Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) + 1));
 			throw new ApplicationException("Login fehlgeschlagen wegen technischer Probleme, bitte nach einigen Stunden erneut probieren");
+		}
+		else
+		{
+			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0");
 		}
 		
 		if (interceptor.Response == null)	
@@ -269,7 +265,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				options1.setProxy(proxy);
 			}
 			
-			var chromePath = konto.getMeta(AMEXSynchronizeBackend.META_CHROMEPATH,  null);
+			/*var chromePath = konto.getMeta(AMEXSynchronizeBackend.META_CHROMEPATH,  null);
 			if (chromePath != null && !chromePath.isBlank())
 			{
 				var chromeFile = new File(chromePath); 
@@ -293,15 +289,42 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			else
 			{
 				log(Level.INFO, "Verwende Chromium von Playwright");
-			}
-			
-			browser = playwright.chromium().launch(options1);
+			}*/
 
-			var stealthContext = Stealth4j.newStealthContext(browser, new Stealth4jConfig.Builder().navigatorWebDriver(true).chromeLoadTimes(true).chromeApp(true).chromeCsi(true).navigatorPlugins(false).mediaCodecs(false).windowOuterDimensions(true).navigatorUserAgent(true, null).build());
+			var ffPath = konto.getMeta(AMEXSynchronizeBackend.META_FIREFOXPATH,  null);
+			if (ffPath != null && !ffPath.isBlank())
+			{
+				var ffFile = new File(ffPath); 
+				if (ffFile.isFile())
+				{
+					if (ffFile.canExecute())
+					{
+						log(Level.INFO, "Verwende Firefox unter " + ffPath);
+						options1 = options1.setExecutablePath(Path.of(ffPath));
+					}
+					else
+					{
+						log(Level.WARN, "Firefox-Pfad auf " + ffPath + " gesetzt, aber Datei nicht ausf\u00FChrbar");
+					}
+				}
+				else
+				{
+					log(Level.WARN, "Firefox-Pfad auf " + ffPath + " gesetzt, aber Datei nicht vorhanden");
+				}
+			}
+			else
+			{
+				log(Level.INFO, "Verwende Firefox von Playwright");
+			}
+
+			options1.setSlowMo(10);			
+			browser = playwright.firefox().launch(options1);
+
+			var stealthContext = Stealth4j.newStealthContext(browser, new Stealth4jConfig.Builder().navigatorWebDriver(true).chromeLoadTimes(true).chromeApp(true).chromeCsi(true).navigatorPlugins(true).mediaCodecs(true).windowOuterDimensions(true).navigatorUserAgent(true, null).navigatorLanguages(true, List.of("de-DE", "de")).build());
 			stealthContext.setExtraHTTPHeaders(Map.of("DNT", "1"));
 
 			ArrayList<Cookie> pwCookies = new ArrayList<>();
-			if ("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")))
+			if ("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")) && Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) <= 3)
 			{
 				var cookiesJSON = new JSONArray(konto.getMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, "[]"));
 				for (var c : cookiesJSON)
@@ -339,7 +362,15 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				log(Level.DEBUG, "Response: " + interceptor.Response.getContent());
 				throw new ApplicationException("Login fehlgeschlagen, Passwort falsch?");
 			}
-			
+
+			try
+			{
+				page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+				page.navigate("https://global.americanexpress.com/api/servicing/v1/financials/transactions?limit=1000&status=pending&extended_details=merchant");
+				page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+			}
+			catch (Exception e) {}
+
 			var assessmentToken = reAuth.getString("assessmentToken");
 			if (needLogin)
 			{
@@ -543,13 +574,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 				konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, cookiesJSON.toString());
 			}
-
-			try
-			{
-				page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-				page.navigate("https://global.americanexpress.com/api/servicing/v1/financials/transactions?limit=1000&status=pending&extended_details=merchant");
-			}
-			catch (Exception e) {}
 
 			var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, null);
 			if (accountToken == null || accountToken.isBlank())
