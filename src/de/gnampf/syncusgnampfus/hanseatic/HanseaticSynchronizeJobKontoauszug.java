@@ -101,8 +101,6 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 				throw new ApplicationException("Weder ein Acess- noch ein ID-Token erhalten");
 			}
 
-			log(Level.INFO, "Anmeldung muss in der Hanseatic-App best\u00E4tigt werden!");
-
 			permanentHeaders.clear();
 			permanentHeaders.add(new KeyValue<>("authorization", "Bearer " + genericToken));
 
@@ -112,7 +110,8 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			JSONObject idt = new JSONObject(js);
 			var scaId = idt.optString("sca_id");
 			
-			while (true) 
+			String sca = null;
+			while (sca == null) 
 			{
 				response = doRequest(baseUrl + "/openScaBroker/1.0/customer/" +  URLEncoder.encode(user, "UTF-8") + "/status/" + scaId, HttpMethod.GET, null, null, null);
 				var status = response.getJSONObject().optString("status");
@@ -130,16 +129,18 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 				{
 					if ("SMS".equals(response.getJSONObject().optString("scaType")))
 					{
-						throw new ApplicationException("Login erfodert eine TAN per SMS, was leider bisher noch nicht implementiert ist. Bitte einmal auf der Website einloggen, danach sollte erstmal keine TAN mehr erforderlich sein.");
-						/*var requestText = "Bitte geben Sie die TAN ein, das sie per SMS erhalten haben.";
-						var sca = Application.getCallback().askUser(requestText, "TAN:");
+						sca = Application.getCallback().askUser("Bitte geben Sie die TAN ein, das sie per SMS erhalten haben.", "TAN:");
 						if (sca == null || sca.isBlank())
 						{
-							throw new ApplicationException("Login abgebrochen wegen fehlender TAN");
-						}*/
+							throw new ApplicationException("TAN-Eingabe abgebrochen");
+						}
+					}
+					else 
+					{
+						log(Level.INFO, "Anmeldung muss in der Hanseatic-App best\u00E4tigt werden!");
 					}
 					log(Level.INFO, "Status ist " + status);
-					Thread.sleep(5000);
+					if (sca == null) Thread.sleep(5000);
 				}
 				else
 				{
@@ -154,7 +155,14 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 				permanentHeaders.add(new KeyValue<>("DEVICETOKEN", deviceToken));
 			}
 
-			response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
+			if (sca == null)
+			{
+				response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&password=" + URLEncoder.encode(passwort, "UTF-8") + "&loginId=" + URLEncoder.encode(user, "UTF-8"));
+			}
+			else
+			{
+				response = doRequest(baseUrl + "/token", HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "grant_type=hbSCACustomPassword&loginId=" + URLEncoder.encode(user, "UTF-8") + "&otp=" + sca + "&scaId=" + scaId);
+			}
 			if (response.getHttpStatus() != 200)
 			{
 				log(Level.DEBUG, "Response: " + response.getContent());

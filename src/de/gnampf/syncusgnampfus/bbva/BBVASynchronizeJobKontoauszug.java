@@ -406,7 +406,11 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							
 							var detailSourceKey = transaction.optJSONObject("origin").optString("detailSourceKey");
 							var detailSourceId = transaction.optJSONObject("origin").optString("detailSourceId");
-							if (detailSourceKey != null && !"".equals(detailSourceKey) && !detailSourceKey.contains(" ") && !"KPSA".equals(detailSourceId))
+							if (detailSourceKey != null && 
+									!"".equals(detailSourceKey) && 
+									!detailSourceKey.contains(" ") && 
+									!"KPSA".equals(detailSourceId) && 
+									!"PGGI".equals(detailSourceId))
 							{
 								var detailResponse = doRequest("https://de-net.bbva.com/transfers/v0/transfers/" + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
 								var detailJSON = detailResponse.getJSONObject();
