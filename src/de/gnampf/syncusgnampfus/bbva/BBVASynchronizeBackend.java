@@ -37,7 +37,7 @@ public class BBVASynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 
 			List<String> result = new ArrayList<String>();
 			result.add(META_FIREFOXPATH);
-			result.add(META_NOTHEADLESS);
+			result.add(META_NOTHEADLESS + "(true/false)");
 			return result;
 		} 
 		catch (RemoteException e) 
