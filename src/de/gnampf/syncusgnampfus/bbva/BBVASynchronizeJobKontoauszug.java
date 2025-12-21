@@ -3,6 +3,8 @@ package de.gnampf.syncusgnampfus.bbva;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.rmi.RemoteException;
 import java.text.SimpleDateFormat;
@@ -353,12 +355,13 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			response = doRequest("https://de-net.bbva.com/accountTransactions/V02/updateAccountTransactions", HttpMethod.POST, headers, "application/json", "{\"contracts\":[{\"id\":\"" + contractId + "\"}]}");
 
-			var page = 0;
-			var numPages = 0;
+			//var page = 0;
+			//var numPages = 0;
 			var dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
 			dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
 			var neueUmsaetze = new ArrayList<Umsatz>();
 			var duplikatGefunden = new Object() { boolean value = false; };
+			String nextPage = null;
 			do 
 			{
 				json = new JSONObject(Map.of(
@@ -373,16 +376,24 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						))))
 					));
 
-				response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=" + page, HttpMethod.POST, headers, "application/json", json.toString());
+				if ((nextPage == null) || (nextPage.isEmpty())) {
+					response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=0", HttpMethod.POST, headers, "application/json", json.toString());
+				} else {
+					response = doRequest("https://de-net.bbva.com" + nextPage, HttpMethod.POST, headers, "application/json", json.toString());
+				}
 				json = response.getJSONObject();
 				var pagination = json.optJSONObject("pagination");
 				if (pagination != null && pagination.has("numPages"))
 				{
-					numPages = pagination.optInt("numPages");
+					var page = pagination.optInt("page");
+					var numPages = pagination.optInt("numPages");
+					nextPage = pagination.optString("nextPage");
+					log(Level.INFO, "Page " + page + " / " + numPages);
 				}
 				else
 				{
 					log(Level.INFO, "Kein Pagination-Objekt oder keine Anzahl Seiten? Gehe von 1 aus");
+					nextPage = null;
 				}
 
 				if (json.has("accountTransactions"))
@@ -482,8 +493,8 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					});
 				}
 
-				page++;
-			} while ((forceAll || !duplikatGefunden.value) && page < numPages);
+				//page++;
+			} while ((forceAll || !duplikatGefunden.value) && ((nextPage != null) && !nextPage.isEmpty()));
 
 			monitor.setPercentComplete(75); 
 			log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");
