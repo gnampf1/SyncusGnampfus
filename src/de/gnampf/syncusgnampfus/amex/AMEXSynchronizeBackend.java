@@ -16,9 +16,8 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 	public final static String META_DEVICECOOKIES = "DeviceCookies";
 	public final static String META_ACCOUNTTOKEN = "AccountToken";
 	public final static String META_TRUST = "Als vertrauensw\u00FCrdiges Ger\u00E4t hinterlegen";
-	public final static String META_CHROMEPATH = "Pfad zu chrome.exe (optional bei Problemen)";
-	public final static String META_FIREFOXPATH = "Pfad zu firefox.exe (optional bei Problemen)";
 	public final static String META_ERRCOUNT = "Error Counter";
+	public final static String META_URL = "URL";
 
     @Override
     public String getName()
@@ -56,8 +55,6 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			result.add(META_TRUST + "(true/false)");
 			result.add(META_NOTHEADLESS + "(true/false)");
 			result.add(META_ACCOUNTTOKEN);
-//			result.add(META_CHROMEPATH);
-			result.add(META_FIREFOXPATH);
 			return result;
 		} 
 		catch (RemoteException e) 

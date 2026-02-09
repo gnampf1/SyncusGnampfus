@@ -12,10 +12,8 @@ import de.willuhn.jameica.hbci.rmi.Konto;
 @Lifecycle(Type.CONTEXT)
 public class BBVASynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 {
-	public final static String META_CHROMEPATH = "Pfad zu chrome.exe (optional bei Problemen)";
-	public final static String META_FIREFOXPATH = "Pfad zu firefox.exe (optional bei Problemen)";
-	public final static String META_NOTHEADLESS = "Browser beim Ermitteln Akamai-Header anzeigen";
 	public final static String META_HEADERS = "Headerdaten";
+	public final static String META_URL = "URL";
 
 	@Override
     public String getName()
@@ -36,8 +34,6 @@ public class BBVASynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			}
 
 			List<String> result = new ArrayList<String>();
-			result.add(META_FIREFOXPATH);
-			result.add(META_NOTHEADLESS + "(true/false)");
 			return result;
 		} 
 		catch (RemoteException e) 

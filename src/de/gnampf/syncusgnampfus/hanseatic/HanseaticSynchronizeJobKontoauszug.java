@@ -48,7 +48,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		}
 		
 		log(Level.DEBUG, "besorge Basic-Credentials");
-		var response = doRequest("https://meine.hanseaticbank.de/de/register/sign-in", HttpMethod.GET, null, null, null);
+		var response = doRequest(decodeItem("aHR0cHM6Ly9tZWluZS5oYW5zZWF0aWNiYW5rLmRlL2RlL3JlZ2lzdGVyL3NpZ24taW4="), HttpMethod.GET, null, null, null);
 		var textContent = response.getContent().replace("\n", "").replace("\r", "");
 		var basicAuth = textContent.replaceAll(".*BASIC_AUTH:\"Basic ([^\"]+)\".*", "$1");
 		var baseUrl = textContent.replaceAll(".*NORTHLAYER_BASE_URL:\"([^\"]+)\".*", "$1");
@@ -113,7 +113,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			String sca = null;
 			while (sca == null) 
 			{
-				response = doRequest(baseUrl + "/openScaBroker/1.0/customer/" +  URLEncoder.encode(user, "UTF-8") + "/status/" + scaId, HttpMethod.GET, null, null, null);
+				response = doRequest(baseUrl + decodeItem("L29wZW5TY2FCcm9rZXIvMS4wL2N1c3RvbWVyLw==") +  URLEncoder.encode(user, "UTF-8") + "/status/" + scaId, HttpMethod.GET, null, null, null);
 				var status = response.getJSONObject().optString("status");
 				if ("complete".equals(status))
 				{
@@ -190,14 +190,14 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 		log(Level.INFO, "Login f\u00FCr " + user + " war erfolgreich");
 		monitor.setPercentComplete(5); 
 
-		response = doRequest(baseUrl + "/pairingSecureApp/1.0/activateCreditCards", HttpMethod.PUT, null, null, null);
+		response = doRequest(baseUrl + decodeItem("L3BhaXJpbmdTZWN1cmVBcHAvMS4wL2FjdGl2YXRlQ3JlZGl0Q2FyZHM="), HttpMethod.PUT, null, null, null);
 		if (response.getHttpStatus() != 200)
 		{
 			log(Level.DEBUG, "Response: " + response.getContent());
 			throw new ApplicationException("ActivateCreditCards fehlgeschlagen");
 		}
 
-		response = doRequest(baseUrl + "/customerportal/1.0/accounts?skipCache=false", HttpMethod.GET, null, null, null);
+		response = doRequest(baseUrl + decodeItem("L2N1c3RvbWVycG9ydGFsLzEuMC9hY2NvdW50cz9za2lwQ2FjaGU9ZmFsc2U="), HttpMethod.GET, null, null, null);
 		if (response.getHttpStatus() != 200)
 		{
 			log(Level.DEBUG, "Response: " + response.getContent());
@@ -247,7 +247,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 			{
 				pageNo++;
 
-				response = doRequest(baseUrl + "/transaction/1.0/transactionsEnriched/" + konto.getKontonummer() + "?page=" + pageNo + "&withReservations=true&withEnrichments=true", HttpMethod.GET, null, null, null);
+				response = doRequest(baseUrl + decodeItem("L3RyYW5zYWN0aW9uLzEuMC90cmFuc2FjdGlvbnNFbnJpY2hlZC8=") + konto.getKontonummer() + "?page=" + pageNo + "&withReservations=true&withEnrichments=true", HttpMethod.GET, null, null, null);
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
@@ -356,7 +356,7 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 
 					do 
 					{
-						response = doRequest(baseUrl + "/scaBroker/1.0/session", HttpMethod.POST, null, "application/json", "{\"initiator\":\"ton-sca-fe\",\"lang\":\"de\",\"session\":\"" + tokenType + " " + token + "\"}");
+						response = doRequest(baseUrl + decodeItem("L3NjYUJyb2tlci8xLjAvc2Vzc2lvbg=="), HttpMethod.POST, null, "application/json", "{\"initiator\":\"ton-sca-fe\",\"lang\":\"de\",\"session\":\"" + tokenType + " " + token + "\"}");
 						if (response.getHttpStatus() != 200)
 						{
 							log(Level.DEBUG, "Response: " + response.getContent());
@@ -393,11 +393,11 @@ public class HanseaticSynchronizeJobKontoauszug extends SyncusGnampfusSynchroniz
 						{
 							if (sca != null)
 							{
-								response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.PUT, null, "application/json", "{\"otp\":\"" + sca + "\"}");
+								response = doRequest(baseUrl + decodeItem("L3NjYUJyb2tlci8xLjAvc3RhdHVzLw==") + uniqueId, HttpMethod.PUT, null, "application/json", "{\"otp\":\"" + sca + "\"}");
 							}
 							else
 							{
-								response = doRequest(baseUrl + "/scaBroker/1.0/status/" + uniqueId, HttpMethod.GET, null, null, null);
+								response = doRequest(baseUrl + decodeItem("L3NjYUJyb2tlci8xLjAvc3RhdHVzLw==") + uniqueId, HttpMethod.GET, null, null, null);
 							}
 							
 							if (response.getHttpStatus() != 200)

@@ -1,6 +1,7 @@
 package de.gnampf.syncusgnampfus;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
 import java.net.Proxy.Type;
 import java.nio.charset.Charset;
@@ -9,6 +10,7 @@ import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.function.Consumer;
@@ -255,6 +257,16 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 
 	public abstract boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception;
 
+	protected static String decodeItem(String encoded) 
+	{
+		try 
+		{
+			return new String(Base64.getDecoder().decode(encoded), "UTF-8");
+		} catch (UnsupportedEncodingException e) {
+			return encoded;
+		}
+	}
+	
 	protected Umsatz getDuplicateByCompare(Umsatz buchung) throws RemoteException
 	{
 		umsaetze.begin();
