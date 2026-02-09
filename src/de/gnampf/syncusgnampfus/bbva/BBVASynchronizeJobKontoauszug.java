@@ -1,5 +1,11 @@
 package de.gnampf.syncusgnampfus.bbva;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.rmi.RemoteException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -329,12 +335,13 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvdXBkYXRlQWNjb3VudFRyYW5zYWN0aW9ucw=="), HttpMethod.POST, headers, "application/json", "{\"contracts\":[{\"id\":\"" + contractId + "\"}]}");
 
-			var page = 0;
-			var numPages = 0;
+			//var page = 0;
+			//var numPages = 0;
 			var dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
 			dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
 			var neueUmsaetze = new ArrayList<Umsatz>();
 			var duplikatGefunden = new Object() { boolean value = false; };
+			String nextPage = null;
 			do 
 			{
 				json = new JSONObject(Map.of(
@@ -349,16 +356,24 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						))))
 					));
 
-				response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9") + page, HttpMethod.POST, headers, "application/json", json.toString());
+				if ((nextPage == null) || (nextPage.isEmpty())) {
+					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9") + "0", HttpMethod.POST, headers, "application/json", json.toString());
+				} else {
+					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20=") + nextPage, HttpMethod.POST, headers, "application/json", json.toString());
+				}
 				json = response.getJSONObject();
 				var pagination = json.optJSONObject("pagination");
 				if (pagination != null && pagination.has("numPages"))
 				{
-					numPages = pagination.optInt("numPages");
+					var page = pagination.optInt("page");
+					var numPages = pagination.optInt("numPages");
+					nextPage = pagination.optString("nextPage");
+					log(Level.INFO, "Page " + page + " / " + numPages);
 				}
 				else
 				{
 					log(Level.INFO, "Kein Pagination-Objekt oder keine Anzahl Seiten? Gehe von 1 aus");
+					nextPage = null;
 				}
 
 				if (json.has("accountTransactions"))
@@ -458,8 +473,8 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					});
 				}
 
-				page++;
-			} while ((forceAll || !duplikatGefunden.value) && page < numPages);
+				//page++;
+			} while ((forceAll || !duplikatGefunden.value) && ((nextPage != null) && !nextPage.isEmpty()));
 
 			monitor.setPercentComplete(75); 
 			log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");
