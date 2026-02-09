@@ -433,28 +433,46 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					//    - restart with page 0, after that continue with nextPage...
 					nextPage = null;
 
-					// TODO ist der call nötig?
+					// TODO ist der call nötig? - wird von der webseite auch ausgeführt
+					log(Level.DEBUG, "get authType -> expect 401");
 					response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=0", HttpMethod.POST, headers, "application/json", json.toString());
+					// just in case the tsec has changed
+					for (var respHeader : response.getResponseHeader())
+					{
+						if ("tsec".equals(respHeader.getName()))
+						{
+							log(Level.DEBUG, "replace tsec");
+							headers.removeIf(p -> p.getKey().compareTo("tsec") == 0);
+							headers.add(new KeyValue<String, String>("tsec", respHeader.getValue()));
+						}
+					}
 					var tmpHeaders = new ArrayList<KeyValue<String, String>>(headers);
 					var headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
 					tmpHeaders.add(headerEntry);
+					log(Level.DEBUG, "get authData-> expect 401");
 					response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=0", HttpMethod.POST, tmpHeaders, "application/json", json.toString());
+
+					// just in case the tsec has changed
+					for (var respHeader : response.getResponseHeader())
+					{
+						if ("tsec".equals(respHeader.getName()))
+						{
+							log(Level.DEBUG, "replace tsec");
+							headers.removeIf(p -> p.getKey().compareTo("tsec") == 0);
+							headers.add(new KeyValue<String, String>("tsec", respHeader.getValue()));
+						}
+					}
 					for (var header : response.getResponseHeader())
 					{
 						if ("authenticationdata".equals(header.getName()))
 						{
+							log(Level.DEBUG, "got AuthData");
 							extSearchAuthenticationData = header.getValue();
 						}
 						else if ("authenticationstate".equals(header.getName()))
 						{
+							log(Level.DEBUG, "got AuthState");
 							extSearchAuthenticationState = header.getValue();
-						}
-						else if ("tsec".equals(header.getName()))
-						{
-							//headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
-							//tmpHeaders.add(headerEntry);
-							headers.clear();
-							headers.add(new KeyValue<String, String>("tsec", header.getValue()));
 						}
 					}
 					// response should be 403 error - ignore it
@@ -473,8 +491,10 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 
 				if ((nextPage == null) || (nextPage.isEmpty())) {
+					log(Level.DEBUG, "nextPage null handling");
 					var tmpHeaders = new ArrayList<KeyValue<String, String>>(headers);
 					if (isExtSearchPending) {
+						log(Level.DEBUG, "isExtSerchPending == true -> first nextPage null handling with additional headers for authType, -data, -state");
 						// this happens only first time when nextPage is reset for advanced Search
 						var headerEntry = new KeyValue<String, String>("authenticationdata", extSearchAuthenticationData + "=" + extSearchOtp); 
 						tmpHeaders.add(headerEntry);
@@ -487,8 +507,27 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					}
 					response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=0", HttpMethod.POST, tmpHeaders, "application/json", json.toString());
 				} else {
+					log(Level.DEBUG, "nextPage handling");
 					response = doRequest("https://de-net.bbva.com" + nextPage, HttpMethod.POST, headers, "application/json", json.toString());
 				}
+				
+				if (response.getHttpStatus() != 200)
+				{
+					log(Level.DEBUG, "Response: " + response.getContent());
+					throw new ApplicationException("Erweiterte Suche fehlgeschlagen");
+				}
+				
+				// just in case the tsec has changed
+				for (var respHeader : response.getResponseHeader())
+				{
+					if ("tsec".equals(respHeader.getName()))
+					{
+						log(Level.DEBUG, "replace tsec");
+						headers.removeIf(p -> p.getKey().compareTo("tsec") == 0);
+						headers.add(new KeyValue<String, String>("tsec", respHeader.getValue()));
+					}
+				}
+				
 				json = response.getJSONObject();
 				var pagination = json.optJSONObject("pagination");
 				if (pagination != null && pagination.has("numPages"))
@@ -607,6 +646,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 				//page++;
 				if (!isExtSearch && (forceAll || !duplikatGefunden.value) && ((nextPage == null) || nextPage.isEmpty())) {
+					log(Level.DEBUG, "no nextPage info found -> switch to ext search");
 					isExtSearch = true;
 					isExtSearchPending = true;
 				}
