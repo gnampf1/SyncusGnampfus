@@ -8,7 +8,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.rmi.RemoteException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
@@ -342,6 +346,18 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			var neueUmsaetze = new ArrayList<Umsatz>();
 			var duplikatGefunden = new Object() { boolean value = false; };
 			String nextPage = null;
+			
+			boolean isExtSearch = false;
+			boolean isExtSearchPending = false;
+			Date extSearchUntil = null;
+			Date transactionsMostEarliestDate[] = {Date.from(
+			        LocalDate.now()
+	                .atTime(LocalTime.MAX)
+	                .atZone(ZoneId.systemDefault())
+	                .toInstant())} ;
+			String extSearchOtp = null;
+			String extSearchAuthenticationData = null;
+			String extSearchAuthenticationState = null;
 			do 
 			{
 				json = new JSONObject(Map.of(
@@ -355,8 +371,100 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 										))
 						))))
 					));
+				
+				// adv search may be activated and is performed from this time until end of loop
+				if (isExtSearch) {
+					Date fromDate = Date.from(
+					        LocalDate.now()
+						        .minusYears(5)
+				                .atTime(LocalTime.MAX)
+				                .atZone(ZoneId.systemDefault())
+				                .toInstant()
+							);
+					if (isExtSearchPending) {
+						// we need a until data is smallest resolution less than the last transaction received - so substract 1 millisecond
+						extSearchUntil = new Date(transactionsMostEarliestDate[0].getTime() - 1);
+					}
+					//Date todayEndDate = Date.from(
+					//        LocalDate.now()
+				    //            .atTime(LocalTime.MAX)
+				    //            .atZone(ZoneId.systemDefault())
+				    //            .toInstant()
+					//		);
+					var filter = new JSONObject(Map.of(
+							"dates", new JSONObject(Map.of(
+									"from", dateFormat.format(fromDate),
+									"to", dateFormat.format(extSearchUntil)
+									)),
+							"operationType", new JSONArray(List.of("BOTH"))
+							));
+					json.put("filter", filter);
+				}
+				
+				if (isExtSearchPending) {
+					log(Level.INFO, "Transaktionen älter als 90Tage benötigen eine extra Verifizierung für erweiterte Suche");
+					
+					// 1) we need to perform additional AdvancedFilterRequest with Filter which fails but leads to
+					// transmitting a TAN to user 
+					// 2) ask for the TAN
+					// 3) continue with normal request 
+					//	  - first request is extended with header field "authenticationdata" and "otp-sms=<TAN>"
+					//    - filter is added due to advSearch-Flag
+					//    - restart with page 0, after that continue with nextPage...
+					nextPage = null;
+
+					// TODO ist der call nötig?
+					response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=0", HttpMethod.POST, headers, "application/json", json.toString());
+					var tmpHeaders = new ArrayList<KeyValue<String, String>>(headers);
+					var headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
+					tmpHeaders.add(headerEntry);
+					response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=0", HttpMethod.POST, tmpHeaders, "application/json", json.toString());
+					for (var header : response.getResponseHeader())
+					{
+						if ("authenticationdata".equals(header.getName()))
+						{
+							extSearchAuthenticationData = header.getValue();
+						}
+						else if ("authenticationstate".equals(header.getName()))
+						{
+							extSearchAuthenticationState = header.getValue();
+						}
+						else if ("tsec".equals(header.getName()))
+						{
+							//headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
+							//tmpHeaders.add(headerEntry);
+							headers.clear();
+							headers.add(new KeyValue<String, String>("tsec", header.getValue()));
+						}
+					}
+					// response should be 403 error - ignore it
+					
+					// this triggered sending a TAN
+					var requestText = "Gib den Bestaetigungscode ein, den du per SMS erhalten hast (fuer 'Alle Transaktionen abrufen')";	// TBD evtl. versch. Wege !?
+
+					extSearchOtp = Application.getCallback().askUser(requestText, "Bestaetigungscode:");
+					if (extSearchOtp == null || extSearchOtp.isBlank())
+					{
+						log(Level.WARN, "TAN-Eingabe 'Alle Transaktionen abrufen' abgebrochen");
+						break;
+					} else {
+						// continue with normal requests, while the advSearchPending Flag leads to adding the OTP once
+					}
+				}
 
 				if ((nextPage == null) || (nextPage.isEmpty())) {
+					var tmpHeaders = new ArrayList<KeyValue<String, String>>(headers);
+					if (isExtSearchPending) {
+						// this happens only first time when nextPage is reset for advanced Search
+						var headerEntry = new KeyValue<String, String>("authenticationdata", extSearchAuthenticationData + "=" + extSearchOtp); 
+						tmpHeaders.add(headerEntry);
+						headerEntry = new KeyValue<String, String>("authenticationstate", extSearchAuthenticationState);
+						tmpHeaders.add(headerEntry);
+						headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
+						tmpHeaders.add(headerEntry);
+						// change to advanced searching done, continue in advSearching-Mode
+						isExtSearchPending = false;
+					}
 					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9") + "0", HttpMethod.POST, headers, "application/json", json.toString());
 				} else {
 					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20=") + nextPage, HttpMethod.POST, headers, "application/json", json.toString());
@@ -368,7 +476,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					var page = pagination.optInt("page");
 					var numPages = pagination.optInt("numPages");
 					nextPage = pagination.optString("nextPage");
-					log(Level.INFO, "Page " + page + " / " + numPages);
+					log(Level.INFO, "Seite " + page + " / " + numPages + (isExtSearch ? "(erweiterte Suche)" : ""));
 				}
 				else
 				{
@@ -388,7 +496,11 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							newUmsatz.setKonto(konto);
 							newUmsatz.setArt(transaction.optJSONObject("concept").optString("name"));
 							newUmsatz.setBetrag(transaction.optJSONObject("amount").optDouble("amount"));
-							newUmsatz.setDatum(dateFormat.parse(transaction.optString("transactionDate")));
+							var d = dateFormat.parse(transaction.optString("transactionDate"));
+							newUmsatz.setDatum(d);
+							if (d.before(transactionsMostEarliestDate[0]))  {
+								transactionsMostEarliestDate[0] = d;
+							}
 							newUmsatz.setSaldo(transaction.optJSONObject("balance").optJSONObject("accountingBalance").optDouble("amount"));
 							newUmsatz.setTransactionId(transaction.optString("id"));
 							newUmsatz.setValuta(dateFormat.parse(transaction.optString("valueDate")));
@@ -474,7 +586,11 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 
 				//page++;
-			} while ((forceAll || !duplikatGefunden.value) && ((nextPage != null) && !nextPage.isEmpty()));
+				if (!isExtSearch && (forceAll || !duplikatGefunden.value) && ((nextPage == null) || nextPage.isEmpty())) {
+					isExtSearch = true;
+					isExtSearchPending = true;
+				}
+			} while ((forceAll || !duplikatGefunden.value) && (isExtSearchPending || ((nextPage != null) && !nextPage.isEmpty())));
 
 			monitor.setPercentComplete(75); 
 			log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");
