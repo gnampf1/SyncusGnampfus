@@ -1,11 +1,5 @@
 package de.gnampf.syncusgnampfus.bbva;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.FileWriter;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.rmi.RemoteException;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
@@ -62,7 +56,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	
 	protected void fetchPermanentHeaders(Konto konto) throws RemoteException, InterruptedException
 	{
-		url = ""; //konto.getMeta(BBVASynchronizeBackend.META_URL, "");
+		url = konto.getMeta(BBVASynchronizeBackend.META_URL, "");
 		var headerText = new Object() { public String value = konto.getMeta(BBVASynchronizeBackend.META_HEADERS, ""); };
 		var urlObj = new Object() { public String value = url; };
 		if ("".equals(headerText.value) || "".equals(url))
@@ -339,8 +333,6 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvdXBkYXRlQWNjb3VudFRyYW5zYWN0aW9ucw=="), HttpMethod.POST, headers, "application/json", "{\"contracts\":[{\"id\":\"" + contractId + "\"}]}");
 
-			//var page = 0;
-			//var numPages = 0;
 			var dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
 			dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
 			var neueUmsaetze = new ArrayList<Umsatz>();
@@ -385,12 +377,6 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						// we need a until data is smallest resolution less than the last transaction received - so substract 1 millisecond
 						extSearchUntil = new Date(transactionsMostEarliestDate[0].getTime() - 1);
 					}
-					//Date todayEndDate = Date.from(
-					//        LocalDate.now()
-				    //            .atTime(LocalTime.MAX)
-				    //            .atZone(ZoneId.systemDefault())
-				    //            .toInstant()
-					//		);
 					var filter = new JSONObject(Map.of(
 							"dates", new JSONObject(Map.of(
 									"from", dateFormat.format(fromDate),
@@ -414,11 +400,11 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					nextPage = null;
 
 					// TODO ist der call nötig?
-					response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=0", HttpMethod.POST, headers, "application/json", json.toString());
+					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9MA=="), HttpMethod.POST, headers, "application/json", json.toString());
 					var tmpHeaders = new ArrayList<KeyValue<String, String>>(headers);
 					var headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
 					tmpHeaders.add(headerEntry);
-					response = doRequest("https://de-net.bbva.com/accountTransactions/V02/accountTransactionsAdvancedSearch?pageSize=40&paginationKey=0", HttpMethod.POST, tmpHeaders, "application/json", json.toString());
+					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9MA=="), HttpMethod.POST, tmpHeaders, "application/json", json.toString());
 					for (var header : response.getResponseHeader())
 					{
 						if ("authenticationdata".equals(header.getName()))
@@ -431,8 +417,6 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						}
 						else if ("tsec".equals(header.getName()))
 						{
-							//headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
-							//tmpHeaders.add(headerEntry);
 							headers.clear();
 							headers.add(new KeyValue<String, String>("tsec", header.getValue()));
 						}
@@ -465,7 +449,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						// change to advanced searching done, continue in advSearching-Mode
 						isExtSearchPending = false;
 					}
-					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9") + "0", HttpMethod.POST, headers, "application/json", json.toString());
+					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9") + "0", HttpMethod.POST, tmpHeaders, "application/json", json.toString());
 				} else {
 					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20=") + nextPage, HttpMethod.POST, headers, "application/json", json.toString());
 				}
@@ -512,10 +496,11 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							if (detailSourceKey != null && 
 									!"".equals(detailSourceKey) && 
 									!detailSourceKey.contains(" ") && 
-									!"KPSA".equals(detailSourceId) && 
+									!"KPSA".equals(detailSourceId) &&
+									!"PGGP".equals(detailSourceId) && 
 									!"PGGI".equals(detailSourceId))
 							{
-								var detailResponse = doRequest("https://de-net.bbva.com/transfers/v0/transfers/" + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
+								var detailResponse = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vdHJhbnNmZXJzL3YwL3RyYW5zZmVycy8=") + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
 								var detailJSON = detailResponse.getJSONObject();
 								if (detailJSON != null && detailJSON.has("data"))
 								{
@@ -585,7 +570,6 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					});
 				}
 
-				//page++;
 				if (!isExtSearch && (forceAll || !duplikatGefunden.value) && ((nextPage == null) || nextPage.isEmpty())) {
 					isExtSearch = true;
 					isExtSearchPending = true;
