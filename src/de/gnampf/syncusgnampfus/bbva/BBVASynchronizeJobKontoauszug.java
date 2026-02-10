@@ -101,34 +101,37 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				{
 					log(Level.INFO, "login called");
 					var req = route.request();
-					var postData = req.postData().toUpperCase();
-					
-					if ("POST".equals(req.method()) && postData != null && postData.contains(user) && postData.contains(pass))
+					var postData = req.postData();
+					if ("POST".equals(req.method()) && postData != null) 
 					{
-						urlObj.value = req.url();
-						log(Level.INFO, "login called, load finished");
-						
-						var header = route.request().headers();
-						var m = Map.of(
-								"akamai-bm-telemetry", header.get("akamai-bm-telemetry"),
-								"bbva-user-agent", header.get("bbva-user-agent"),
-								"contactid", header.get("contactid"),
-								"thirdparty-deviceid", header.get("thirdparty-deviceid"),
-								"user-agent", header.getOrDefault("User-Agent", header.getOrDefault("user-agent", ""))
-								);
-						var j = new JSONObject(m);
-						headerText.value = j.toString();
-						try 
+						postData = postData.toUpperCase();
+						if (postData.contains(user) && postData.contains(pass))
 						{
-							konto.setMeta(BBVASynchronizeBackend.META_HEADERS, headerText.value);
-							konto.setMeta(BBVASynchronizeBackend.META_URL, urlObj.value);
+							urlObj.value = req.url();
+							log(Level.INFO, "login called, load finished");
+							
+							var header = route.request().headers();
+							var m = Map.of(
+									"akamai-bm-telemetry", header.get("akamai-bm-telemetry"),
+									"bbva-user-agent", header.get("bbva-user-agent"),
+									"contactid", header.get("contactid"),
+									"thirdparty-deviceid", header.get("thirdparty-deviceid"),
+									"user-agent", header.getOrDefault("User-Agent", header.getOrDefault("user-agent", ""))
+									);
+							var j = new JSONObject(m);
+							headerText.value = j.toString();
+							try 
+							{
+								konto.setMeta(BBVASynchronizeBackend.META_HEADERS, headerText.value);
+								konto.setMeta(BBVASynchronizeBackend.META_URL, urlObj.value);
+							}
+							catch (RemoteException e) 
+							{
+							}
+							
+							log(Level.INFO, "Header: " + header.get("akamai-bm-telemetry"));
+							loadFinished.found = true;
 						}
-						catch (RemoteException e) 
-						{
-						}
-						
-						log(Level.INFO, "Header: " + header.get("akamai-bm-telemetry"));
-						loadFinished.found = true;
 					}
 					
 					route.fulfill(new FulfillOptions().setBody("Ende").setStatus(200));
@@ -242,19 +245,10 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			}
 
 			headers.clear();
-			String tsec = null;
-			for (var header : response.getResponseHeader())
-			{
-				if ("tsec".equals(header.getName()))
-				{
-					tsec = header.getValue();
-					break;
-				}
-			}
-			headers.add(new KeyValue<>("tsec", tsec));
+			updateTsec(response, headers);
 
 			ArrayList<KeyValue<String, String>> tsecheaders = new ArrayList<>();
-			tsecheaders.add(new KeyValue<>("x-tsec-token", tsec));
+			headers.forEach(c -> { if ("tsec".equals(c.getKey())) tsecheaders.add(new KeyValue<>("x-tsec-token", c.getValue())); });
 			response = doRequest(decodeItem("aHR0cHM6Ly9wb3J0dW51cy1odWItZXMubGl2ZS5nbG9iYWwucGxhdGZvcm0uYmJ2YS5jb20vdjEvdHNlYw=="), HttpMethod.GET, tsecheaders, null, null);
 			if (response.getHttpStatus() != 200)
 			{
@@ -394,7 +388,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 				
 				if (isExtSearchPending) {
-					log(Level.INFO, "Transaktionen älter als 90Tage benötigen eine extra Verifizierung für erweiterte Suche");
+					log(Level.INFO, "Transaktionen \u00E4lter als 90Tage ben\u00f6tigen eine extra Verifizierung f\u00FCr erweiterte Suche");
 					
 					// 1) we need to perform additional AdvancedFilterRequest with Filter which fails but leads to
 					// transmitting a TAN to user 
@@ -408,32 +402,14 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					// TODO ist der call nötig? - wird von der webseite auch ausgeführt
 					log(Level.DEBUG, "get authType -> expect 401");
 					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9MA=="), HttpMethod.POST, headers, "application/json", json.toString());
-					// just in case the tsec has changed
-					for (var respHeader : response.getResponseHeader())
-					{
-						if ("tsec".equals(respHeader.getName()))
-						{
-							log(Level.DEBUG, "replace tsec");
-							headers.removeIf(p -> p.getKey().compareTo("tsec") == 0);
-							headers.add(new KeyValue<String, String>("tsec", respHeader.getValue()));
-						}
-					}
+					updateTsec(response, headers);
 					var tmpHeaders = new ArrayList<KeyValue<String, String>>(headers);
 					var headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
 					tmpHeaders.add(headerEntry);
 					log(Level.DEBUG, "get authData-> expect 401");
 					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9MA=="), HttpMethod.POST, tmpHeaders, "application/json", json.toString());
+					updateTsec(response, headers);
 
-					// just in case the tsec has changed
-					for (var respHeader : response.getResponseHeader())
-					{
-						if ("tsec".equals(respHeader.getName()))
-						{
-							log(Level.DEBUG, "replace tsec");
-							headers.removeIf(p -> p.getKey().compareTo("tsec") == 0);
-							headers.add(new KeyValue<String, String>("tsec", respHeader.getValue()));
-						}
-					}
 					for (var header : response.getResponseHeader())
 					{
 						if ("authenticationdata".equals(header.getName()))
@@ -445,11 +421,6 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						{
 							log(Level.DEBUG, "got AuthState");
 							extSearchAuthenticationState = header.getValue();
-						}
-						else if ("tsec".equals(header.getName()))
-						{
-							headers.clear();
-							headers.add(new KeyValue<String, String>("tsec", header.getValue()));
 						}
 					}
 					// response should be 403 error - ignore it
@@ -494,16 +465,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					throw new ApplicationException("Erweiterte Suche fehlgeschlagen");
 				}
 				
-				// just in case the tsec has changed
-				for (var respHeader : response.getResponseHeader())
-				{
-					if ("tsec".equals(respHeader.getName()))
-					{
-						log(Level.DEBUG, "replace tsec");
-						headers.removeIf(p -> p.getKey().compareTo("tsec") == 0);
-						headers.add(new KeyValue<String, String>("tsec", respHeader.getValue()));
-					}
-				}
+				updateTsec(response, headers);
 				
 				json = response.getJSONObject();
 				var pagination = json.optJSONObject("pagination");
@@ -644,5 +606,18 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			catch (Exception e) {}
 		}
 		return true;
+	}
+	
+	private void updateTsec(WebResult response, ArrayList<KeyValue<String, String>> headers)
+	{
+		for (var respHeader : response.getResponseHeader())
+		{
+			if ("tsec".equals(respHeader.getName()))
+			{
+					log(Level.DEBUG, "replace tsec");
+					headers.removeIf(p -> p.getKey().compareTo("tsec") == 0);
+					headers.add(new KeyValue<String, String>("tsec", respHeader.getValue()));
+			}
+		}
 	}
 }
