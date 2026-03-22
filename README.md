@@ -4,6 +4,7 @@ Unterstützung für den Umsatz- und Saldoabruf bei folgenden Banken
  - American Express Kreditkarte, getestet mit Payback-AMEX-Karte
  - Hanseatic Bank Kreditkarten, getestet mit AWA7
  - BBVA Girokonto (nur Umsatzabruf)
+ - Scalable Capital
 
 ## Einrichtung
 Entweder das Plugin als ZIP-File aus den Github-Releases in Hibiscus importieren, oder in den Jameica-Einstellungen unter *Plugins / Repositories bearbeiten* die URL https://www.gnampf.cyou/hibiscus ergänzen und unter *verfügbare Plugins* auswählen. Beim ersten Mal muss das Zertifikat akzeptiert werden, daher hier zum Abgleich:
@@ -24,6 +25,17 @@ Kundenkennung muss der Benutzerkennung fürs Onlinebanking entsprechen, IBAN der
 
 ### BBVA
 Kundenkennung muss hier dem Benutzernamen fürs Onlinebanking entsprechen, IBAN der IBAN fürs Konto. BLZ & Kontonummer werden damit automatisch gefüllt. Unter **Zugangsweg** *BBVA* auswählen.
+
+
+### Scalable Capital
+Für alle Funktionen müssen drei Konten angelegt werden.
+| Art  | Kontoart  | Kundenkennung  | IBAN  | Zugangsweg  | 
+|---|---|---|---|---|
+| Verrechnungskonto  | Kontokorrent/Girokonto  | E-Mail-Adresse, wie beim Login genutzt  | Gemäß Angabe auf der Webseite  | Scalable Capital  |
+| Tagesgeldkonto  | Sparkonto  |   E-Mail-Adresse wie, beim Login genutzt  | Gemäß Angabe auf der Webseite   | Scalable Capital |
+| Depot  | Wertpapierdepot  | E-Mail-Adresse, wie beim Login genutzt  | Gemäß Angabe auf der Webseite  | Scalable Capital |
+
+Für das Depot muss das Plugin "hibiscus.depotviewer" installiert sein.
 
 ## Wechsel von Mashup
 Sowohl die Hanseatic-Kreditkarten-Konten als auch die American Express-Konten, die mit Mashup angelegt wurden, können weiter verwendet werden. Dazu in den Einstellungen vom Konto die Zugangsart von *non-HBCI (Hibiscus-Mashup)* auf *AMEX* bzw. *HanseaticBank* ändern.
