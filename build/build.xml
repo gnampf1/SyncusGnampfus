@@ -16,6 +16,7 @@
 <!-- Maven-Version ist für Java >17 compiliert, daher nicht nutzbar -->
 <!--      <resolver:dependency groupId="io.github.kihdev.playwright-stealth-4j" artifactId="playwright-stealth-4j" version="1.0.0" />-->
       <resolver:dependency groupId="org.jetbrains.kotlin" artifactId="kotlin-stdlib" version="2.2.0" />
+      <resolver:dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.21.2"/>
     </resolver:dependencies>
     <resolver:files refid="src.files" dir="lib" layout="{artifactId}-{classifier}.{extension}"/>
   </resolver:resolve>
