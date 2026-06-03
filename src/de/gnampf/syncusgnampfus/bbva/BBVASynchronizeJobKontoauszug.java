@@ -511,7 +511,8 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 									!"".equals(detailSourceKey) && 
 									!detailSourceKey.contains(" ") && 
 									!"KPSA".equals(detailSourceId) &&
-									!"PGGP".equals(detailSourceId) && 
+									!"PGGP".equals(detailSourceId) &&
+									!"SBTF".equals(detailSourceId) && 
 									!"PGGI".equals(detailSourceId))
 							{
 								var detailResponse = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vdHJhbnNmZXJzL3YwL3RyYW5zZmVycy8=") + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
