@@ -18,6 +18,7 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 	public final static String META_TRUST = "Als vertrauensw\u00FCrdiges Ger\u00E4t hinterlegen";
 	public final static String META_ERRCOUNT = "Error Counter";
 	public final static String META_URL = "URL";
+	public final static String META_MULTICARD = "Partnerkarten mit abrufen";
 
     @Override
     public String getName()
@@ -41,6 +42,14 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			{
 				konto.setMeta(META_OTPTYPE, "ES");
 			}
+			else 
+			{
+				// Bei Bestandskonten werden Partnerkarten nicht automatisch mit abgerufen, bei neuen Konten per Default schon
+				if (konto.getMeta(META_MULTICARD, null) == null)
+				{
+					konto.setMeta(META_MULTICARD, "false");
+				}
+			}
 			if (konto.getMeta(META_NOTHEADLESS,  null) == null)
 			{
 				konto.setMeta(META_NOTHEADLESS, "false");
@@ -49,10 +58,15 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			{
 				konto.setMeta(META_TRUST, "true");
 			}
+			if (konto.getMeta(META_MULTICARD, null) == null)
+			{
+				konto.setMeta(META_MULTICARD, "true");
+			}
 
 			List<String> result = new ArrayList<String>();
 			result.add(META_OTPTYPE);
 			result.add(META_TRUST + "(true/false)");
+			result.add(META_MULTICARD + "(true/false)");
 			result.add(META_NOTHEADLESS + "(true/false)");
 			result.add(META_ACCOUNTTOKEN);
 			return result;

@@ -1,9 +1,5 @@
 package de.gnampf.syncusgnampfus.amex;
 
-import java.io.File;
-import java.io.IOException;
-import java.net.URISyntaxException;
-import java.nio.file.Path;
 import java.rmi.RemoteException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -16,18 +12,15 @@ import java.util.function.Consumer;
 import javax.annotation.Resource;
 
 import org.htmlunit.HttpMethod;
-import org.htmlunit.util.NameValuePair;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.microsoft.playwright.Browser;
-import com.microsoft.playwright.Browser.NewContextOptions;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Locator.WaitForOptions;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Page.ScreenshotOptions;
 import com.microsoft.playwright.Playwright;
-import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
 import com.microsoft.playwright.Route.FulfillOptions;
@@ -709,11 +702,16 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	{
 		var kontoNr = konto.getUnterkonto();
 		var duplikate = new ArrayList<Umsatz>();
+		var multiCard = konto.getMeta(AMEXSynchronizeBackend.META_MULTICARD, "false") == "true";
+		var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, "");
 		
 		for (var transObj : transactions)
 		{
 			var transaction = (JSONObject)transObj;
-			if (kontoNr.equals(transaction.optString("display_account_number")))
+			if (
+					(!multiCard && kontoNr.equals(transaction.optString("display_account_number"))) ||
+					(multiCard && accountToken.equals(transaction.optString("account_token")))
+				)
 			{
 				var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
 				newUmsatz.setKonto(konto);
