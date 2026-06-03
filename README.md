@@ -26,6 +26,10 @@ Kundenkennung muss der Benutzerkennung fürs Onlinebanking entsprechen, IBAN der
 ### BBVA
 Kundenkennung muss hier dem Benutzernamen fürs Onlinebanking entsprechen, IBAN der IBAN fürs Konto. BLZ & Kontonummer werden damit automatisch gefüllt. Unter **Zugangsweg** *BBVA* auswählen.
 
+### Raisin / Weltsparen
+Bei allen Konten die Raisin-IBAN (im Popup-Menü rechts oben hinter euren Initialen auf der Website) verwenden. Kundenkennung ist die verwendete Email-Adresse.
+Für das Haupt/Transferkonto: die Unterkontonummer leer lassen:
+Für angelegte Tages- oder Festgelder: die Unterkontonummer mit der depositId des Kontos füllen. Diese findet ihr z.B. in der URL wenn ihr das Konto aufruft. Dürfte aus 5 Gruppen a 3 Zeichen getrennt durch _ bestehen. Bei der Eingabe in Hibiscus die Unterstriche weg lassen und alle 15 Zeichen hintereinander weg eingeben. Unter **Zugangsweg** *Raisin* auswählen.
 
 ### Scalable Capital
 Für alle Funktionen müssen drei Konten angelegt werden.
@@ -45,3 +49,4 @@ Sowohl die Hanseatic-Kreditkarten-Konten als auch die American Express-Konten, d
 - bei Umstellung von Mashup kann es bei der Hanseaticbank noch einmalig zu Doppeleinträgen kommen
 - Hanseaticbank verlangt alle 180 Tage bei der Anmeldung eine SMS-Tan. Das Handling ist hier bisher noch ungetestet, sollte aber prinzipiell funktionieren. Wenn es doch zu Fehlern kommt sollte der nächste Abruf ohne TAN klappen, notfalls einmal auf der Website anmelden. Feedback ob es geklappt hat, oder nicht, wäre nett.
 - Wenn AMEX **Login fehlgeschlagen wegen technischer Probleme, bitte nach einigen Stunden erneut probieren** meldet, dann hat der Abwehrmechanismus gegriffen. Hier dann am nächsten Tag (oder nach mehreren Stunden) nochmal probieren. Das Problem tritt auf, wenn zu viele Abfragen innerhalb zu kurzer Zeit getätigt werden (hier hilft dann AMEX einfach eine Zeit in Ruhe zu lassen), oder wenn AMEX mal wieder seine Erkennungsroutinen nachgeschärft hat (hier helfen dann nur Code-Anpassungen). Ggf. hilft auch das Anzeigen des Browsers in den Synchronisierungsoptionen
+- Bei Raisin gibt es ggf. Probleme mit der Captcha-Abfrage wenn zu viele Abfragen in zu kurzer Zeit gemacht werden. Dann einfach mal eine Weile Ruhe geben sollte helfen. Bei Problemen mit der Captcha-Abfrage solltet ihr dann auch ein Browser-Fenster kurzzeitig zu Gesicht bekommen.
