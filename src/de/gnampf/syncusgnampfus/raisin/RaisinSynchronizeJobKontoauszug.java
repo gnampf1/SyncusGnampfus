@@ -143,7 +143,7 @@ public class RaisinSynchronizeJobKontoauszug
         log(Level.INFO, "TRA-ID: " + traId);
 
         String accountUrl = TAMS_BASE + "/accounts/" + traId + "?embed=balance";
-        var response = doRequest(accountUrl, HttpMethod.GET, null, null, null);
+        var response = doRequest(accountUrl, HttpMethod.GET, null, "application/json", null);
         var accountData = response.getJSONObject();
 
         if (fetchSaldo)
@@ -188,7 +188,7 @@ public class RaisinSynchronizeJobKontoauszug
 		        String dateFrom = fromDate.format(DateTimeFormatter.ISO_LOCAL_DATE);
 		        String txUrl = TAMS_BASE + "/accounts/" + traId + "/transactions?offset=0&limit=100&date_from=" + dateFrom;
 	
-		        response = doRequest(txUrl, HttpMethod.GET, null, null, null);
+		        response = doRequest(txUrl, HttpMethod.GET, null, "application/json", null);
 		        transactions = response.getJSONArray();
 		        var batch = new ArrayList<Umsatz>();
 		        log(Level.INFO, transactions.length() + " Transaktionen seit " + dateFrom);
@@ -266,7 +266,7 @@ public class RaisinSynchronizeJobKontoauszug
 
 	private String resolveTraId() throws Exception 
 	{
-        var response = doRequest(TAMS_BASE + "/accounts?filter=customerId+eq+" + bacId, HttpMethod.GET, null, null, null);
+        var response = doRequest(TAMS_BASE + "/accounts?filter=customerId+eq+" + bacId, HttpMethod.GET, null, "application/json", null);
         var accounts = response.getJSONArray();
 
         for (int i = 0; i < accounts.length(); i++) 
@@ -288,7 +288,7 @@ public class RaisinSynchronizeJobKontoauszug
 
     private void syncUnterkonto(Konto konto, ArrayList<Umsatz> neueUmsaetze, ArrayList<Umsatz> duplikate, boolean fetchSaldo, boolean fetchUmsaetze,  boolean forceAll, String omaId) throws Exception 
     {
-        var response = doRequest(DEPOSIT_BASE + "/" + omaId, HttpMethod.GET, null, null, null);
+        var response = doRequest(DEPOSIT_BASE + "/" + omaId, HttpMethod.GET, null, "application/json", null);
         var accounting = response.getJSONObject();
 
         if (accounting == null) return;
@@ -453,7 +453,6 @@ public class RaisinSynchronizeJobKontoauszug
         
         page.locator("input[name='email'], input[type='email']").fill(username);
         page.locator("input[name='password'], input[type='password']").fill(password);
-        Thread.sleep(5_000);
         page.locator("button[type='submit']").click();
 
         var deadline = System.currentTimeMillis() + (options1.headless ? 30_000 : 300_000);
@@ -536,7 +535,7 @@ public class RaisinSynchronizeJobKontoauszug
 	            log(Level.INFO, "2FA erforderlich. Verification-ID: " + verificationId);
 	
 	            var smsURL = decodeItem("aHR0cHM6Ly9hcGkyLndlbHRzcGFyZW4uZGUvc2Nhcy9hcGkvdjIvdmVyaWZpY2F0aW9ucy8=") + verificationId + decodeItem("L2F0dGVtcHRzP2xvY2FsZT1kZS1ERSZjaGFubmVsPVNNUw==");
-	            var smsResp = doRequest(smsURL, HttpMethod.POST, headers, null, null);
+	            var smsResp = doRequest(smsURL, HttpMethod.POST, headers, "application/json", null);
 	            if (smsResp.getHttpStatus() != 202) 
 	            {
 	                throw new RuntimeException("SMS-Anforderung fehlgeschlagen: HTTP " + smsResp.getHttpStatus() + " – " + smsResp.getContent());
