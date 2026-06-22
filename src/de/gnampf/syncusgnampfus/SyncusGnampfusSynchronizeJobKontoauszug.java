@@ -52,6 +52,13 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 	protected WebClient webClient;
 	protected List<KeyValue<String, String>> permanentHeaders = new ArrayList<KeyValue<String, String>>();
 
+	protected boolean skipLogout = false;
+	
+	public void setSkipLogout(boolean value)
+	{
+		skipLogout = value;
+	}
+	
 	protected abstract SynchronizeBackend getBackend();
 	
 	@Override

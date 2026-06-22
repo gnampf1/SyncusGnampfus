@@ -14,7 +14,6 @@ import de.willuhn.jameica.hbci.rmi.Umsatz;
 import de.willuhn.jameica.hbci.synchronize.SynchronizeBackend;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.logging.Level;
-import de.willuhn.logging.Logger;
 import de.willuhn.util.ApplicationException;
 import io.github.kihdev.playwright.stealth4j.Stealth4j;
 import io.github.kihdev.playwright.stealth4j.Stealth4jConfig;
@@ -24,8 +23,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.lang.ProcessHandle.Info;
-import java.net.URI;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +31,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Resource;
@@ -54,13 +52,13 @@ public class RaisinSynchronizeJobKontoauszug
     private static final String DEPOSIT_BASE = decodeItem("aHR0cHM6Ly9hcGkyLndlbHRzcGFyZW4uZGUvZGFzL3YxL2RlcG9zaXRz");
     private static final String LOGOUT_URL = decodeItem("aHR0cHM6Ly9hcGkyLndlbHRzcGFyZW4uZGUvdW1zL3YxL3B1YmxpYy90b2tlbi9sb2dvdXQ=");
     private static final String TOKEN_URL = decodeItem("aHR0cHM6Ly9hdXRoLnJhaXNpbi5jb20vYXV0aC9yZWFsbXMvZ2xvYmFsL3Byb3RvY29sL29wZW5pZC1jb25uZWN0L3Rva2Vu");
-
+    private static final String REFRESH_URL = decodeItem("aHR0cHM6Ly9hcGkyLndlbHRzcGFyZW4uZGUvdW1zL3YxL3B1YmxpYy90b2tlbi9yZWZyZXNo");
 
     // -------------------------------------------------------------------
     // State captured during login
     // -------------------------------------------------------------------
-    private String accessToken;
-    private String refreshToken;
+    private static HashMap<String, String> accessToken = new HashMap<>();
+    private static HashMap<String, String> refreshToken = new HashMap<>();
     private String bacId;
     private LaunchOptions options1;
 
@@ -123,17 +121,21 @@ public class RaisinSynchronizeJobKontoauszug
 		}
 		finally
 		{
-			if (accessToken != null)
-			{
-				try 
+/*			if (!this.skipLogout) {
+				if (accessToken.getOrDefault(user, null) != null)
 				{
-					doRequest(LOGOUT_URL, HttpMethod.POST, null, "application/json", "{\"refresh_token\":\"" + URLEncoder.encode(refreshToken, StandardCharsets.UTF_8) + "\"}");
-			    } 
-				catch (Exception e) 
-				{
-			        log(Level.WARN, "Logout fehlgeschlagen: " + e.getMessage());
-			    }		
-			}
+					try 
+					{
+						doRequest(LOGOUT_URL, HttpMethod.POST, null, "application/json", "{\"refresh_token\":\"" + URLEncoder.encode(refreshToken.get(user), StandardCharsets.UTF_8) + "\"}");
+				    } 
+					catch (Exception e) 
+					{
+				        log(Level.WARN, "Logout fehlgeschlagen: " + e.getMessage());
+				    }		
+				}
+				accessToken.remove(user);
+				refreshToken.remove(user);
+			}*/
 		}
     }
 
@@ -484,126 +486,151 @@ public class RaisinSynchronizeJobKontoauszug
 
 	private void loginWithPlaywright(Konto konto, String username, String password) throws Exception 
 	{
-        log(Level.INFO, "Starte Browser f\u00FCr Captcha-L\u00f6sung (1/2)...");
-
-        Page page = null;
-        CaptchaData captcha;
-        try 
-        {
-			var headless = "false".equals(konto.getMeta(RaisinSynchronizeBackend.META_NOTHEADLESS,  "false"));
-			page = getPage(konto, headless);
-	        captcha = solveCaptcha(konto, page, username, password);
-
-	        var formBody = "client_id=login&grant_type=password"
-	                + "&username=" + URLEncoder.encode(captcha.username, StandardCharsets.UTF_8)
-	                + "&password=" + URLEncoder.encode(captcha.password, StandardCharsets.UTF_8);
-	
-	        var headers = new ArrayList<KeyValue<String, String>>();
-	        headers.add(new KeyValue<>("Captcha-Solution-Token",           captcha.captchaToken));
-	        headers.add(new KeyValue<>("Sardine-Session-Key",              captcha.sardineKey));
-	        headers.add(new KeyValue<>("Locale",                           "de-DE"));
-	        headers.add(new KeyValue<>("Raisin-Device-Whitelist-Consent",  "true"));
-	        var firstTokenResp = doRequest(TOKEN_URL, HttpMethod.POST, headers, "application/x-www-form-urlencoded", formBody);
-	        
-	        if (firstTokenResp.getHttpStatus() == 200) 
+		if (accessToken.getOrDefault(username, null) != null) 
+		{
+			permanentHeaders.clear();
+	        permanentHeaders.add(new KeyValue<>("Authorization", "Bearer " + accessToken.get(username)));
+	        permanentHeaders.add(new KeyValue<>("Origin", decodeItem("aHR0cHM6Ly93d3cucmFpc2luLmNvbQ==")));
+	        var response = doRequest(REFRESH_URL, HttpMethod.POST, null, "application/json", "{\"access_token\":\"" + accessToken.get(username) + "\",\"refresh_token\":\"" + refreshToken.get(username) + "\"}");
+	        if (response.getHttpStatus() == 200)
 	        {
-	            accessToken = firstTokenResp.getJSONObject().getString("access_token");
-	            refreshToken = firstTokenResp.getJSONObject().getString("refresh_token");
-	            log(Level.INFO, "Login ohne 2FA erfolgreich.");
-	        } 
-	        else if (firstTokenResp.getHttpStatus() == 202)
-	        {
-	        	String verificationId = null;
-	            headers.clear();
-	            headers.add(new KeyValue<>("Accept",        "application/json"));
-	        	for (var header : firstTokenResp.getResponseHeader()) 
-	        	{
-	        		switch (header.getName())
-	        		{
-	        		case "customer-id":
-	        		case "user-id":
-	        			headers.add(new KeyValue<>(header.getName(), header.getValue()));
-	        			break;
-	        		case "verification-id":
-	        			verificationId = header.getValue();
-	        			break;
-	        		case "guest-token":
-	        			headers.add(new KeyValue<>("Authorization", "Bearer " + header.getValue()));
-	        			break;
-	        		}
-	        	}
-	            log(Level.INFO, "2FA erforderlich. Verification-ID: " + verificationId);
-	
-	            var smsURL = decodeItem("aHR0cHM6Ly9hcGkyLndlbHRzcGFyZW4uZGUvc2Nhcy9hcGkvdjIvdmVyaWZpY2F0aW9ucy8=") + verificationId + decodeItem("L2F0dGVtcHRzP2xvY2FsZT1kZS1ERSZjaGFubmVsPVNNUw==");
-	            var smsResp = doRequest(smsURL, HttpMethod.POST, headers, "application/json", null);
-	            if (smsResp.getHttpStatus() != 202) 
-	            {
-	                throw new RuntimeException("SMS-Anforderung fehlgeschlagen: HTTP " + smsResp.getHttpStatus() + " – " + smsResp.getContent());
-	            }
-	
-	            var nonce = smsResp.getJSONObject().getString("nonce");
-	            log(Level.INFO, "SMS gesendet. Nonce: " + nonce);
-	
-	            var tan = Application.getCallback().askUser("Bitte geben Sie die per SMS erhaltenen TAN ein", "TAN:");
-	            if (tan == null || tan.isBlank()) 
-	            {
-	                throw new RuntimeException("Keine TAN eingegeben.");
-	            }
-	
-	            var tanBody = new JSONObject().put("verification_code", tan.trim()).toString();
-	            var putUri = decodeItem("aHR0cHM6Ly9hcGkyLndlbHRzcGFyZW4uZGUvc2Nhcy9hcGkvdjIvdmVyaWZpY2F0aW9ucy8=") + verificationId + "/attempts/" + nonce;
-	            var putResp = doRequest(putUri, HttpMethod.PUT, headers, "application/json", tanBody);
-	            if (putResp.getHttpStatus() != 201) 
-	            {
-	                throw new RuntimeException("TAN-\u00FCbermittlung fehlgeschlagen: HTTP " + putResp.getHttpStatus() + " – " + putResp.getContent());
-	            }
-	
-	            var putJson = putResp.getJSONObject();
-	            if (!"VALIDATED".equals(putJson.optString("state"))) 
-	            {
-	                throw new RuntimeException("TAN nicht akzeptiert. State: " + putJson.optString("state"));
-	            }
-	            log(Level.INFO, "TAN validiert. Starte Browser f\u00FCr Captcha-L\u00f6sung (2/2)...");
-	
-	            captcha = solveCaptcha(konto, page, username, password);
-	
-	            var formBody2 = "client_id=login&grant_type=password"
-	                    + "&username=" + URLEncoder.encode(captcha.username, StandardCharsets.UTF_8)
-	                    + "&password=" + URLEncoder.encode(captcha.password, StandardCharsets.UTF_8);
-	
-	            headers.clear();            
-	            headers.add(new KeyValue<>("Captcha-Solution-Token",           captcha.captchaToken));
-	            headers.add(new KeyValue<>("Sardine-Session-Key",              captcha.sardineKey));
-	            headers.add(new KeyValue<>("Locale",                           "de-DE"));
-	            headers.add(new KeyValue<>("Verification-ID",                  verificationId));
-	            headers.add(new KeyValue<>("Raisin-Device-Whitelist-Consent",  "true"));
-	            var finalTokenResp = doRequest(TOKEN_URL, HttpMethod.POST, headers, "application/x-www-form-urlencoded", formBody2);
-	            if (finalTokenResp.getHttpStatus() != 200) 
-	            {
-	                throw new RuntimeException("Finales Token fehlgeschlagen: HTTP " + finalTokenResp.getHttpStatus() + " – " + finalTokenResp.getContent());
-	            }
-	
-	            accessToken = finalTokenResp.getJSONObject().getString("access_token");
-	            refreshToken = finalTokenResp.getJSONObject().getString("refresh_token");
-	            log(Level.INFO, "Login mit 2FA erfolgreich.");
+	        	var json = response.getJSONObject();
+	        	accessToken.replace(username, json.getString("access_token"));
+	        	refreshToken.replace(username, json.getString("refresh_token"));
+	        	log(Level.INFO, "Bestehendes Accesstoken refreshed");
 	        }
-	        else 
+	        else
 	        {
-	            throw new RuntimeException("Unerwarteter HTTP-Status beim Token-Request: " + firstTokenResp.getHttpStatus() + " – " + firstTokenResp.getContent());
+	        	accessToken.remove(username);
+	        	refreshToken.remove(username);
+	        	log(Level.INFO, "Bestehendes Accesstoken ung\u00FCltig, erneuere Login");
 	        }
 		}
-		finally
+
+		if (accessToken.get(username) == null)
 		{
-			if (page != null) 
+			log(Level.INFO, "Starte Browser f\u00FCr Captcha-L\u00f6sung (1/2)...");
+	
+	        Page page = null;
+	        CaptchaData captcha;
+	        try 
+	        {
+				var headless = "false".equals(konto.getMeta(RaisinSynchronizeBackend.META_NOTHEADLESS,  "false"));
+				page = getPage(konto, headless);
+		        captcha = solveCaptcha(konto, page, username, password);
+	
+		        var formBody = "client_id=login&grant_type=password"
+		                + "&username=" + URLEncoder.encode(captcha.username, StandardCharsets.UTF_8)
+		                + "&password=" + URLEncoder.encode(captcha.password, StandardCharsets.UTF_8);
+		
+		        var headers = new ArrayList<KeyValue<String, String>>();
+		        headers.add(new KeyValue<>("Captcha-Solution-Token",           captcha.captchaToken));
+		        headers.add(new KeyValue<>("Sardine-Session-Key",              captcha.sardineKey));
+		        headers.add(new KeyValue<>("Locale",                           "de-DE"));
+		        headers.add(new KeyValue<>("Raisin-Device-Whitelist-Consent",  "true"));
+		        var firstTokenResp = doRequest(TOKEN_URL, HttpMethod.POST, headers, "application/x-www-form-urlencoded", formBody);
+		        
+		        if (firstTokenResp.getHttpStatus() == 200) 
+		        {
+		            accessToken.put(username, firstTokenResp.getJSONObject().getString("access_token"));
+		            refreshToken.put(username, firstTokenResp.getJSONObject().getString("refresh_token"));
+		            log(Level.INFO, "Login ohne 2FA erfolgreich.");
+		        } 
+		        else if (firstTokenResp.getHttpStatus() == 202)
+		        {
+		        	String verificationId = null;
+		            headers.clear();
+		            headers.add(new KeyValue<>("Accept",        "application/json"));
+		        	for (var header : firstTokenResp.getResponseHeader()) 
+		        	{
+		        		switch (header.getName())
+		        		{
+		        		case "customer-id":
+		        		case "user-id":
+		        			headers.add(new KeyValue<>(header.getName(), header.getValue()));
+		        			break;
+		        		case "verification-id":
+		        			verificationId = header.getValue();
+		        			break;
+		        		case "guest-token":
+		        			headers.add(new KeyValue<>("Authorization", "Bearer " + header.getValue()));
+		        			break;
+		        		}
+		        	}
+		            log(Level.INFO, "2FA erforderlich. Verification-ID: " + verificationId);
+		
+		            var smsURL = decodeItem("aHR0cHM6Ly9hcGkyLndlbHRzcGFyZW4uZGUvc2Nhcy9hcGkvdjIvdmVyaWZpY2F0aW9ucy8=") + verificationId + decodeItem("L2F0dGVtcHRzP2xvY2FsZT1kZS1ERSZjaGFubmVsPVNNUw==");
+		            var smsResp = doRequest(smsURL, HttpMethod.POST, headers, "application/json", null);
+		            if (smsResp.getHttpStatus() != 202) 
+		            {
+		                throw new RuntimeException("SMS-Anforderung fehlgeschlagen: HTTP " + smsResp.getHttpStatus() + " – " + smsResp.getContent());
+		            }
+		
+		            var nonce = smsResp.getJSONObject().getString("nonce");
+		            log(Level.INFO, "SMS gesendet. Nonce: " + nonce);
+		
+		            var tan = Application.getCallback().askUser("Bitte geben Sie die per SMS erhaltenen TAN ein", "TAN:");
+		            if (tan == null || tan.isBlank()) 
+		            {
+		                throw new RuntimeException("Keine TAN eingegeben.");
+		            }
+		
+		            var tanBody = new JSONObject().put("verification_code", tan.trim()).toString();
+		            var putUri = decodeItem("aHR0cHM6Ly9hcGkyLndlbHRzcGFyZW4uZGUvc2Nhcy9hcGkvdjIvdmVyaWZpY2F0aW9ucy8=") + verificationId + "/attempts/" + nonce;
+		            var putResp = doRequest(putUri, HttpMethod.PUT, headers, "application/json", tanBody);
+		            if (putResp.getHttpStatus() != 201) 
+		            {
+		                throw new RuntimeException("TAN-\u00FCbermittlung fehlgeschlagen: HTTP " + putResp.getHttpStatus() + " – " + putResp.getContent());
+		            }
+		
+		            var putJson = putResp.getJSONObject();
+		            if (!"VALIDATED".equals(putJson.optString("state"))) 
+		            {
+		                throw new RuntimeException("TAN nicht akzeptiert. State: " + putJson.optString("state"));
+		            }
+		            log(Level.INFO, "TAN validiert. Starte Browser f\u00FCr Captcha-L\u00f6sung (2/2)...");
+		
+		            captcha = solveCaptcha(konto, page, username, password);
+		
+		            var formBody2 = "client_id=login&grant_type=password"
+		                    + "&username=" + URLEncoder.encode(captcha.username, StandardCharsets.UTF_8)
+		                    + "&password=" + URLEncoder.encode(captcha.password, StandardCharsets.UTF_8);
+		
+		            headers.clear();            
+		            headers.add(new KeyValue<>("Captcha-Solution-Token",           captcha.captchaToken));
+		            headers.add(new KeyValue<>("Sardine-Session-Key",              captcha.sardineKey));
+		            headers.add(new KeyValue<>("Locale",                           "de-DE"));
+		            headers.add(new KeyValue<>("Verification-ID",                  verificationId));
+		            headers.add(new KeyValue<>("Raisin-Device-Whitelist-Consent",  "true"));
+		            var finalTokenResp = doRequest(TOKEN_URL, HttpMethod.POST, headers, "application/x-www-form-urlencoded", formBody2);
+		            if (finalTokenResp.getHttpStatus() != 200) 
+		            {
+		                throw new RuntimeException("Finales Token fehlgeschlagen: HTTP " + finalTokenResp.getHttpStatus() + " – " + finalTokenResp.getContent());
+		            }
+		
+		            accessToken.put(username, finalTokenResp.getJSONObject().getString("access_token"));
+		            refreshToken.put(username, finalTokenResp.getJSONObject().getString("refresh_token"));
+		            log(Level.INFO, "Login mit 2FA erfolgreich.");
+		        }
+		        else 
+		        {
+		            throw new RuntimeException("Unerwarteter HTTP-Status beim Token-Request: " + firstTokenResp.getHttpStatus() + " – " + firstTokenResp.getContent());
+		        }
+			}
+			finally
 			{
-				page.close();
+				if (page != null) 
+				{
+					page.close();
+				}
 			}
 		}
-
-        permanentHeaders.add(new KeyValue<>("Authorization", "Bearer " + accessToken));
+		
+		permanentHeaders.clear();
+        permanentHeaders.add(new KeyValue<>("Authorization", "Bearer " + accessToken.get(username)));
         permanentHeaders.add(new KeyValue<>("Origin", decodeItem("aHR0cHM6Ly93d3cucmFpc2luLmNvbQ==")));
 
-        bacId = extractBacIdFromJwt(accessToken);
+        bacId = extractBacIdFromJwt(accessToken.get(username));
         log(Level.INFO, "BAC-ID from JWT: " + bacId);
 
         if (bacId == null) 

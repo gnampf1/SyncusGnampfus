@@ -1,5 +1,7 @@
 package de.gnampf.syncusgnampfus;
 
+import java.util.ArrayList;
+import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -22,8 +24,9 @@ public abstract class SyncusGnampfusSynchronizeJobProviderKontoauszug implements
 	@Override
 	public List<SynchronizeJob> getSynchronizeJobs(Konto k)
 	{
-		Class<SynchronizeJobKontoauszug> type = SynchronizeJobKontoauszug.class;
+		Class<SyncusGnampfusSynchronizeJobKontoauszug> type = SyncusGnampfusSynchronizeJobKontoauszug.class;
 
+		var jobHash = new Hashtable<String, ArrayList<SyncusGnampfusSynchronizeJobKontoauszug>>(); 
 		List<SynchronizeJob> jobs = new LinkedList<SynchronizeJob>();
 		for (Konto kt:(List<Konto>)getBackend().getSynchronizeKonten(k))
 		{
@@ -36,10 +39,14 @@ public abstract class SyncusGnampfusSynchronizeJobProviderKontoauszug implements
 
 				if (!options.getSyncKontoauszuege()) // Sync-Option zum Kontoauszugs-Abruf aktiv?
 					continue;
-
-				SynchronizeJobKontoauszug job = (SynchronizeJobKontoauszug) getBackend().create(type,kt); // erzeugt eine Instanz von ExampleSynchronizeJobKontoauszug
+				
+				SyncusGnampfusSynchronizeJobKontoauszug job = (SyncusGnampfusSynchronizeJobKontoauszug) getBackend().create(type,kt); // erzeugt eine Instanz von ExampleSynchronizeJobKontoauszug
 				job.setContext(SynchronizeJob.CTX_ENTITY,kt);
-				jobs.add(job);
+
+				var username = kt.getKundennummer();
+				var list = jobHash.getOrDefault(username, new ArrayList<SyncusGnampfusSynchronizeJobKontoauszug>());
+				list.add(job);
+				jobHash.putIfAbsent(username, list);
 			}
 			catch (Exception e)
 			{
@@ -47,6 +54,15 @@ public abstract class SyncusGnampfusSynchronizeJobProviderKontoauszug implements
 			}
 		}
 
+		for (var item : jobHash.entrySet())
+		{
+			var list = item.getValue();
+			for (int i = 0; i < list.size(); i++)
+			{
+				list.get(i).setSkipLogout(i < list.size() - 1);
+			}
+			jobs.addAll(list);
+		}
 		return jobs;
 	}
 
