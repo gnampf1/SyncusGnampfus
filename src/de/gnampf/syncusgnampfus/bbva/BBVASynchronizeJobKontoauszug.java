@@ -262,36 +262,28 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			JSONArray contracts = response.getJSONObject().optJSONObject("data").optJSONArray("contracts");
 			var contractDetails = new Object() { JSONObject ktoContract = null;  JSONObject availableBalance = null; JSONObject currentBalance = null;  };
 			var myIban = konto.getIban();
+			var kreditkarte = konto.getUnterkonto(); 
+			var isKreditkarte = kreditkarte != null && !kreditkarte.isBlank();
 			contracts.forEach(c -> 
 			{
 				var contract = (JSONObject)c;
-				contract.optJSONArray("formats").forEach(f -> 
+				if (isKreditkarte && kreditkarte.equals(contract.optString("number")))
 				{
-					var format = (JSONObject)f;
-					if ("IBAN".equals(format.optJSONObject("numberType").optString("id")) && myIban.equals(format.optString("number")))
+					contractDetails.ktoContract = contract;
+					return;
+				}
+				else 
+				{
+					contract.optJSONArray("formats").forEach(f -> 
 					{
-						contractDetails.ktoContract = contract;
-						((JSONArray)contract.query("/detail/specificAmounts")).forEach(a ->
+						var format = (JSONObject)f;
+						if ("IBAN".equals(format.optJSONObject("numberType").optString("id")) && myIban.equals(format.optString("number")))
 						{
-							var amountObj = (JSONObject)a;
-							switch (amountObj.optString("id"))
-							{
-							case "availableBalance":
-								contractDetails.availableBalance = new JSONObject(Map.of(
-										"amount", amountObj.query("/amounts/0/amount"),
-										"currency", new JSONObject(Map.of("id", amountObj.query("/amounts/0/currency")))
-										));
-								break;
-							case "currentBalance":
-								contractDetails.currentBalance = new JSONObject(Map.of(
-										"amount", amountObj.query("/amounts/0/amount"),
-										"currency", new JSONObject(Map.of("id", amountObj.query("/amounts/0/currency")))
-										));
-								break;
-							}
-						});
-					}
-				});
+							contractDetails.ktoContract = contract;
+							return;
+						}
+					});
+				}
 			});
 
 			if (contractDetails.ktoContract == null)
@@ -300,38 +292,77 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				throw new ApplicationException("Konto mit IBAN " + konto.getIban() + " nicht gefunden!");
 			}
 
+			((JSONArray)contractDetails.ktoContract.query("/detail/specificAmounts")).forEach(a ->
+			{
+				var amountObj = (JSONObject)a;
+				switch (amountObj.optString("id"))
+				{
+				case "availableBalance":
+					contractDetails.availableBalance = new JSONObject(Map.of(
+							"amount", amountObj.query("/amounts/0/amount"),
+							"currency", new JSONObject(Map.of("id", amountObj.query("/amounts/0/currency")))
+							));
+					break;
+				case "currentBalance":
+					contractDetails.currentBalance = new JSONObject(Map.of(
+							"amount", amountObj.query("/amounts/0/amount"),
+							"currency", new JSONObject(Map.of("id", amountObj.query("/amounts/0/currency")))
+							));
+					break;
+				case "disposedAmount":
+					contractDetails.currentBalance = new JSONObject(Map.of(
+							"amount", amountObj.query("/amounts/0/amount"),
+							"currency", new JSONObject(Map.of("id", amountObj.query("/amounts/0/currency")))
+							));
+					break;
+				}
+			});
+
 			var contractId = contractDetails.ktoContract.optString("id");
 
 			if (fetchSaldo)
 			{
 				konto.setSaldoAvailable(contractDetails.availableBalance.optDouble("amount"));
-				konto.setSaldo(contractDetails.currentBalance.optDouble("amount"));
-
-				response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudHMvdjAvYWNjb3VudHMv") + contractId + decodeItem("L2Rpc3Bva3JlZGl0cy92YWxpZGF0aW9ucy8="), HttpMethod.GET, headers, null, null);
-				JSONObject dispo = response.getJSONObject().optJSONObject("data");
-				if (dispo != null)
+				
+				if (contractDetails.currentBalance != null)
 				{
-					dispo.optJSONArray("dispokreditAmounts").forEach(d ->
+					if (isKreditkarte) 
 					{
-						JSONObject dispoAmount = (JSONObject)d;
-						if ("stdAuthDispoAmount".equals(dispoAmount.getString("id")))
+						konto.setSaldo(-contractDetails.currentBalance.optDouble("amount"));
+					}
+					else
+					{
+						konto.setSaldo(contractDetails.currentBalance.optDouble("amount"));
+						response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudHMvdjAvYWNjb3VudHMv") + contractId + decodeItem("L2Rpc3Bva3JlZGl0cy92YWxpZGF0aW9ucy8="), HttpMethod.GET, headers, null, null);
+						JSONObject dispo = response.getJSONObject().optJSONObject("data");
+						if (dispo != null)
 						{
-							try 
+							dispo.optJSONArray("dispokreditAmounts").forEach(d ->
 							{
-								konto.setSaldoAvailable(konto.getSaldoAvailable() + dispoAmount.getJSONObject("amount").getDouble("amount"));
-							} catch (RemoteException ex)
-							{
-								log(Level.ERROR, "Fehler beim Setzen vom Dispo-Saldo: " + ex.toString());								monitor.log("Fehler beim Setzen vom Dispo-Saldo");
-							}
+								JSONObject dispoAmount = (JSONObject)d;
+								if ("stdAuthDispoAmount".equals(dispoAmount.getString("id")))
+								{
+									try 
+									{
+										konto.setSaldoAvailable(konto.getSaldoAvailable() + dispoAmount.getJSONObject("amount").getDouble("amount"));
+									} catch (RemoteException ex)
+									{
+										log(Level.ERROR, "Fehler beim Setzen vom Dispo-Saldo: " + ex.toString());								monitor.log("Fehler beim Setzen vom Dispo-Saldo");
+									}
+								}
+							});
 						}
-					});
+					}
 				}
 	
 				konto.store();
 				Application.getMessagingFactory().sendMessage(new SaldoMessage(konto));
 			}
 
-			response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvdXBkYXRlQWNjb3VudFRyYW5zYWN0aW9ucw=="), HttpMethod.POST, headers, "application/json", "{\"contracts\":[{\"id\":\"" + contractId + "\"}]}");
+			if (!isKreditkarte)
+			{
+				response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvdXBkYXRlQWNjb3VudFRyYW5zYWN0aW9ucw=="), HttpMethod.POST, headers, "application/json", "{\"contracts\":[{\"id\":\"" + contractId + "\"}]}");
+			}
 
 			var dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
 			dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
@@ -352,39 +383,78 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			String extSearchAuthenticationState = null;
 			do 
 			{
-				json = new JSONObject(Map.of(
-						"customer", new JSONObject(Map.of("id", personId)),
-						"searchType", "SEARCH",
-						"accountContracts", new JSONArray(List.of(new JSONObject(Map.of(
-								"contract", new JSONObject(Map.of("id", contractId)),
-								"account", new JSONObject(Map.of(
-										"currentBalance", contractDetails.currentBalance,
-										"availableBalance", contractDetails.availableBalance
+				if (isKreditkarte)
+				{
+					json = new JSONObject(Map.of(
+							"cards", new JSONArray(List.of(
+										new JSONObject(Map.of(
+												"id", contractId
 										))
-						))))
-					));
-				
-				// adv search may be activated and is performed from this time until end of loop
-				if (isExtSearch) {
-					Date fromDate = Date.from(
-					        LocalDate.now()
-						        .minusYears(5)
-				                .atTime(LocalTime.MAX)
-				                .atZone(ZoneId.systemDefault())
-				                .toInstant()
-							);
-					if (isExtSearchPending) {
-						// we need a until data is smallest resolution less than the last transaction received - so substract 1 millisecond
-						extSearchUntil = new Date(transactionsMostEarliestDate[0].getTime() - 1);
-					}
-					var filter = new JSONObject(Map.of(
-							"dates", new JSONObject(Map.of(
-									"from", dateFormat.format(fromDate),
-									"to", dateFormat.format(extSearchUntil)
 									)),
-							"operationType", new JSONArray(List.of("BOTH"))
+							"customerId", personId,
+							"showContractTransaction", false,
+							"sortedBy", "TRANSACTION_DATE",
+							"sortedType", "DESC"
 							));
-					json.put("filter", filter);
+					
+					// adv search may be activated and is performed from this time until end of loop
+					if (isExtSearch) {
+						Date fromDate = Date.from(
+						        LocalDate.now()
+							        .minusYears(5)
+					                .atTime(LocalTime.MAX)
+					                .atZone(ZoneId.systemDefault())
+					                .toInstant()
+								);
+						if (isExtSearchPending) {
+							// we need a until data is smallest resolution less than the last transaction received - so substract 1 millisecond
+							extSearchUntil = new Date(transactionsMostEarliestDate[0].getTime() - 1);
+						}
+						var filter = new JSONObject(Map.of(
+								"transactionDate", new JSONObject(Map.of(
+										"from", dateFormat.format(fromDate),
+										"to", dateFormat.format(extSearchUntil)
+										))
+								));
+						json.put("searchFilters", filter);
+					}
+				}
+				else
+				{
+					json = new JSONObject(Map.of(
+							"customer", new JSONObject(Map.of("id", personId)),
+							"searchType", "SEARCH",
+							"accountContracts", new JSONArray(List.of(new JSONObject(Map.of(
+									"contract", new JSONObject(Map.of("id", contractId)),
+									"account", new JSONObject(Map.of(
+											"currentBalance", contractDetails.currentBalance,
+											"availableBalance", contractDetails.availableBalance
+											))
+							))))
+						));
+				
+					// adv search may be activated and is performed from this time until end of loop
+					if (isExtSearch) {
+						Date fromDate = Date.from(
+						        LocalDate.now()
+							        .minusYears(5)
+					                .atTime(LocalTime.MAX)
+					                .atZone(ZoneId.systemDefault())
+					                .toInstant()
+								);
+						if (isExtSearchPending) {
+							// we need a until data is smallest resolution less than the last transaction received - so substract 1 millisecond
+							extSearchUntil = new Date(transactionsMostEarliestDate[0].getTime() - 1);
+						}
+						var filter = new JSONObject(Map.of(
+								"dates", new JSONObject(Map.of(
+										"from", dateFormat.format(fromDate),
+										"to", dateFormat.format(extSearchUntil)
+										)),
+								"operationType", new JSONArray(List.of("BOTH"))
+								));
+						json.put("filter", filter);
+					}
 				}
 				
 				if (isExtSearchPending) {
@@ -401,13 +471,17 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 					// TODO ist der call nötig? - wird von der webseite auch ausgeführt
 					log(Level.DEBUG, "get authType -> expect 401");
-					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9MA=="), HttpMethod.POST, headers, "application/json", json.toString());
+					var url = isKreditkarte ? 
+						"aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vY2FyZFRyYW5zYWN0aW9ucy9WMDEvbGlzdEludGVncmF0ZWRDYXJkVHJhbnNhY3Rpb25zP3BhZ2VTaXplPTYwJnBhZ2luYXRpb25LZXk9MA==" 
+						:
+						"aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9MA==";
+						response = doRequest(decodeItem(url), HttpMethod.POST, headers, "application/json", json.toString());
 					updateTsec(response, headers);
 					var tmpHeaders = new ArrayList<KeyValue<String, String>>(headers);
 					var headerEntry = new KeyValue<String, String>("authenticationtype", "05"); 
 					tmpHeaders.add(headerEntry);
 					log(Level.DEBUG, "get authData-> expect 401");
-					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9MA=="), HttpMethod.POST, tmpHeaders, "application/json", json.toString());
+					response = doRequest(decodeItem(url), HttpMethod.POST, tmpHeaders, "application/json", json.toString());
 					updateTsec(response, headers);
 
 					for (var header : response.getResponseHeader())
@@ -453,7 +527,11 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						// change to advanced searching done, continue in advSearching-Mode
 						isExtSearchPending = false;
 					}
-					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9") + "0", HttpMethod.POST, tmpHeaders, "application/json", json.toString());
+					var url = isKreditkarte ? 
+							"aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vY2FyZFRyYW5zYWN0aW9ucy9WMDEvbGlzdEludGVncmF0ZWRDYXJkVHJhbnNhY3Rpb25zP3BhZ2VTaXplPTYwJnBhZ2luYXRpb25LZXk9"
+							:
+							"aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vYWNjb3VudFRyYW5zYWN0aW9ucy9WMDIvYWNjb3VudFRyYW5zYWN0aW9uc0FkdmFuY2VkU2VhcmNoP3BhZ2VTaXplPTQwJnBhZ2luYXRpb25LZXk9";
+					response = doRequest(decodeItem(url) + "0", HttpMethod.POST, tmpHeaders, "application/json", json.toString());
 				} else {
 					log(Level.DEBUG, "nextPage handling");
 					response = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20=") + nextPage, HttpMethod.POST, headers, "application/json", json.toString());
@@ -469,11 +547,19 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				
 				json = response.getJSONObject();
 				var pagination = json.optJSONObject("pagination");
-				if (pagination != null && pagination.has("numPages"))
+				if (pagination != null && pagination.has("nextPage"))
 				{
 					var page = pagination.optInt("page");
-					var numPages = pagination.optInt("numPages");
 					nextPage = pagination.optString("nextPage");
+					var numPages = 0;
+					if (isKreditkarte) 
+					{
+						numPages = (int)Math.ceil(1.0 * json.optInt("totalResults") / pagination.optInt("pageSize"));
+					}
+					else 
+					{
+						numPages = pagination.optInt("numPages");
+					}
 					log(Level.INFO, "Seite " + page + " / " + numPages + (isExtSearch ? "(erweiterte Suche)" : ""));
 				}
 				else
@@ -482,9 +568,19 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					nextPage = null;
 				}
 
+				JSONArray arr = null;
 				if (json.has("accountTransactions"))
 				{
-					json.getJSONArray("accountTransactions").forEach(t -> 
+					arr = json.getJSONArray("accountTransactions");
+				}
+				else if (json.has("cardsTransactions"))
+				{
+					arr = json.getJSONArray("cardsTransactions");
+				}
+				
+				if (arr != null)
+				{
+					arr.forEach(t -> 
 					{
 						var transaction = (JSONObject)t;
 	
@@ -499,61 +595,70 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							if (d.before(transactionsMostEarliestDate[0]))  {
 								transactionsMostEarliestDate[0] = d;
 							}
-							newUmsatz.setSaldo(transaction.optJSONObject("balance").optJSONObject("accountingBalance").optDouble("amount"));
-							newUmsatz.setTransactionId(transaction.optString("id"));
-							newUmsatz.setValuta(dateFormat.parse(transaction.optString("valueDate")));
-	
-							var vz = transaction.optString("humanExtendedConceptName");
 							
-							var detailSourceKey = transaction.optJSONObject("origin").optString("detailSourceKey");
-							var detailSourceId = transaction.optJSONObject("origin").optString("detailSourceId");
-							if (detailSourceKey != null && 
-									!"".equals(detailSourceKey) && 
-									!detailSourceKey.contains(" ") && 
-									!"KPSA".equals(detailSourceId) &&
-									!"PGGP".equals(detailSourceId) &&
-									!"SBTF".equals(detailSourceId) && 
-									!"PGGI".equals(detailSourceId))
+							String zweck;
+							if (!isKreditkarte) 
 							{
-								var detailResponse = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vdHJhbnNmZXJzL3YwL3RyYW5zZmVycy8=") + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
-								var detailJSON = detailResponse.getJSONObject();
-								if (detailJSON != null && detailJSON.has("data"))
+								newUmsatz.setSaldo(transaction.optJSONObject("balance").optJSONObject("accountingBalance").optDouble("amount"));
+								var vz = transaction.optString("humanExtendedConceptName");
+
+								var detailSourceKey = transaction.optJSONObject("origin").optString("detailSourceKey");
+								var detailSourceId = transaction.optJSONObject("origin").optString("detailSourceId");
+								if (detailSourceKey != null && 
+										!"".equals(detailSourceKey) && 
+										!detailSourceKey.contains(" ") && 
+										!"KPSA".equals(detailSourceId) &&
+										!"PGGP".equals(detailSourceId) &&
+										!"SBTF".equals(detailSourceId) && 
+										!"PGGI".equals(detailSourceId))
 								{
-									var details = detailResponse.getJSONObject().getJSONObject("data");
-	
-									var gegenkto = details.getJSONObject("sender");
-									var eigenkto = details.getJSONObject("receiver");
-									if ("BBVADEFFXXX".equals(gegenkto.getJSONObject("bank").getString("BICCode")))
+									var detailResponse = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vdHJhbnNmZXJzL3YwL3RyYW5zZmVycy8=") + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
+									var detailJSON = detailResponse.getJSONObject();
+									if (detailJSON != null && detailJSON.has("data"))
 									{
-										eigenkto = gegenkto;
-										gegenkto = details.optJSONObject("receiver");
-									}
-	
-									newUmsatz.setCustomerRef(eigenkto.optString("reference"));
-									newUmsatz.setGegenkontoBLZ(gegenkto.optJSONObject("bank").optString("BICCode"));
-									var name = gegenkto.optString("fullName"); 
-									if (name != null && !"".equals(name))
-									{
-										newUmsatz.setGegenkontoName(name);
+										var details = detailResponse.getJSONObject().getJSONObject("data");
+		
+										var gegenkto = details.getJSONObject("sender");
+										var eigenkto = details.getJSONObject("receiver");
+										if ("BBVADEFFXXX".equals(gegenkto.getJSONObject("bank").getString("BICCode")))
+										{
+											eigenkto = gegenkto;
+											gegenkto = details.optJSONObject("receiver");
+										}
+		
+										newUmsatz.setCustomerRef(eigenkto.optString("reference"));
+										newUmsatz.setGegenkontoBLZ(gegenkto.optJSONObject("bank").optString("BICCode"));
+										var name = gegenkto.optString("fullName"); 
+										if (name != null && !"".equals(name))
+										{
+											newUmsatz.setGegenkontoName(name);
+										}
+										else
+										{
+											newUmsatz.setGegenkontoName(gegenkto.optString("alias"));
+										}
+										newUmsatz.setGegenkontoNummer(gegenkto.optJSONObject("contract").optString("number"));
+										
+										if (details.has("concept"))
+										{
+											vz = details.getString("concept");
+										}
 									}
 									else
 									{
-										newUmsatz.setGegenkontoName(gegenkto.optString("alias"));
-									}
-									newUmsatz.setGegenkontoNummer(gegenkto.optJSONObject("contract").optString("number"));
-									
-									if (details.has("concept"))
-									{
-										vz = details.getString("concept");
+										log(Level.WARN, "Keine Umsatzdetails, obwohl erwartet. Bitte DetailSourceId = " + detailSourceId + " an gnampf melden");
 									}
 								}
-								else
-								{
-									log(Level.WARN, "Keine Umsatzdetails, obwohl erwartet. Bitte DetailSourceId = " + detailSourceId + " an gnampf melden");
-								}
+								zweck = transaction.optString("humanConceptName") + " " + vz;
+							}
+							else
+							{
+								zweck = transaction.optJSONObject("shop").optString("name");
 							}
 
-							String zweck = transaction.optString("humanConceptName") + " " + vz;
+							newUmsatz.setTransactionId(transaction.optString("id"));
+							newUmsatz.setValuta(dateFormat.parse(transaction.optString("valueDate")));
+
 							int len = Math.min(35, zweck.length());
 							newUmsatz.setZweck(zweck.substring(0, len));
 							zweck = zweck.substring(len);
@@ -585,7 +690,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					});
 				}
 
-				if (!isExtSearch && (forceAll || !duplikatGefunden.value) && ((nextPage == null) || nextPage.isEmpty())) {
+				if (!isExtSearch && !isKreditkarte && (forceAll || !duplikatGefunden.value) && ((nextPage == null) || nextPage.isEmpty())) {
 					log(Level.DEBUG, "no nextPage info found -> switch to ext search");
 					isExtSearch = true;
 					isExtSearchPending = true;

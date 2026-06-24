@@ -23,8 +23,11 @@ In den Synchronisationsoptionen kann außerdem eingestellt werden, ob das Plugin
 ### Hanseatic Bank
 Kundenkennung muss der Benutzerkennung fürs Onlinebanking entsprechen, IBAN der IBAN für die Kreditkarte (im Onlinebanking unter *Menü / Meine Kreditkarte* links unten zu finden. BLZ & Kontonummer werden damit automatisch gefüllt. Unter **Zugangsweg** *HanseaticBank* auswählen.
 
-### BBVA
+### BBVA - Girokonto und Tagesgeld
 Kundenkennung muss hier dem Benutzernamen fürs Onlinebanking entsprechen, IBAN der IBAN fürs Konto. BLZ & Kontonummer werden damit automatisch gefüllt. Unter **Zugangsweg** *BBVA* auswählen.
+
+### BBVA - Kredit- und Debitkarte
+Einrichtung wie das zugehörige Girokonto (oder auch mit einer Fake-IBAN wenn gewünscht). Als Unterkonto muss dann die Kreditkartennummer (ohne Leerzeichen) angegeben werden. Im Falle der Debitkarte ist das Saldo immer 0.
 
 ### Raisin / Weltsparen
 Bei allen Konten die Raisin-IBAN (im Popup-Menü rechts oben hinter euren Initialen auf der Website) verwenden. Kundenkennung ist die verwendete Email-Adresse.
@@ -47,6 +50,5 @@ Sowohl die Hanseatic-Kreditkarten-Konten als auch die American Express-Konten, d
 ## Bekannte Probleme
 - AMEX funktioniert aktuell noch nicht mit der App. Mit Email / SMS klappt es aber auch bei registrierter App. 
 - bei Umstellung von Mashup kann es bei der Hanseaticbank noch einmalig zu Doppeleinträgen kommen
-- Hanseaticbank verlangt alle 180 Tage bei der Anmeldung eine SMS-Tan. Das Handling ist hier bisher noch ungetestet, sollte aber prinzipiell funktionieren. Wenn es doch zu Fehlern kommt sollte der nächste Abruf ohne TAN klappen, notfalls einmal auf der Website anmelden. Feedback ob es geklappt hat, oder nicht, wäre nett.
 - Wenn AMEX **Login fehlgeschlagen wegen technischer Probleme, bitte nach einigen Stunden erneut probieren** meldet, dann hat der Abwehrmechanismus gegriffen. Hier dann am nächsten Tag (oder nach mehreren Stunden) nochmal probieren. Das Problem tritt auf, wenn zu viele Abfragen innerhalb zu kurzer Zeit getätigt werden (hier hilft dann AMEX einfach eine Zeit in Ruhe zu lassen), oder wenn AMEX mal wieder seine Erkennungsroutinen nachgeschärft hat (hier helfen dann nur Code-Anpassungen). Ggf. hilft auch das Anzeigen des Browsers in den Synchronisierungsoptionen
 - Bei Raisin gibt es ggf. Probleme mit der Captcha-Abfrage wenn zu viele Abfragen in zu kurzer Zeit gemacht werden. Dann einfach mal eine Weile Ruhe geben sollte helfen. Bei Problemen mit der Captcha-Abfrage solltet ihr dann auch ein Browser-Fenster kurzzeitig zu Gesicht bekommen.
