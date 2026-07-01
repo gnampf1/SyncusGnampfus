@@ -192,7 +192,6 @@ public class RaisinSynchronizeJobKontoauszug
 	
 		        response = doRequest(txUrl, HttpMethod.GET, null, "application/json", null);
 		        transactions = response.getJSONArray();
-		        var batch = new ArrayList<Umsatz>();
 		        log(Level.INFO, transactions.length() + " Transaktionen seit " + dateFrom);
 	
 		        for (int i = 0; i < transactions.length(); i++) 
@@ -200,7 +199,7 @@ public class RaisinSynchronizeJobKontoauszug
 		            JSONObject tx = transactions.getJSONObject(i);
 		            storeTransaction(
 		            		konto,
-		            		batch,
+		            		neueUmsaetze,
 		            		duplikate,
 		                    tx.optString("id"),
 		                    parseDate(tx.optString("bookingDate", "").substring(0, 10)),

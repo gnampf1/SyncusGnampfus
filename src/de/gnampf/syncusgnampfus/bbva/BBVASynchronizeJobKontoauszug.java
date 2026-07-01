@@ -262,7 +262,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			JSONArray contracts = response.getJSONObject().optJSONObject("data").optJSONArray("contracts");
 			var contractDetails = new Object() { JSONObject ktoContract = null;  JSONObject availableBalance = null; JSONObject currentBalance = null;  };
 			var myIban = konto.getIban();
-			var kreditkarte = konto.getUnterkonto(); 
+			var kreditkarte = konto.getUnterkonto().replace(" ", ""); 
 			var isKreditkarte = kreditkarte != null && !kreditkarte.isBlank();
 			contracts.forEach(c -> 
 			{
@@ -289,7 +289,14 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			if (contractDetails.ktoContract == null)
 			{
 				log(Level.DEBUG, "Response: " + response.getContent());
-				throw new ApplicationException("Konto mit IBAN " + konto.getIban() + " nicht gefunden!");
+				if (isKreditkarte)
+				{
+					throw new ApplicationException("Kredit/Debitkarte mit Nummer " + konto.getUnterkonto() + " nicht gefunden!");
+				}
+				else
+				{
+					throw new ApplicationException("Konto mit IBAN " + konto.getIban() + " nicht gefunden!");
+				}
 			}
 
 			((JSONArray)contractDetails.ktoContract.query("/detail/specificAmounts")).forEach(a ->
