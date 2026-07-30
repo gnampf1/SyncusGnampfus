@@ -1,5 +1,6 @@
 package de.gnampf.syncusgnampfus.amex;
 
+import java.nio.charset.StandardCharsets;
 import java.rmi.RemoteException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -7,7 +8,7 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
+import java.util.UUID;
 
 import javax.annotation.Resource;
 
@@ -15,20 +16,14 @@ import org.htmlunit.HttpMethod;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import com.microsoft.playwright.Browser;
-import com.microsoft.playwright.BrowserType;
-import com.microsoft.playwright.Locator.WaitForOptions;
-import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Page.ScreenshotOptions;
-import com.microsoft.playwright.Playwright;
-import com.microsoft.playwright.Request;
-import com.microsoft.playwright.Response;
-import com.microsoft.playwright.Route.FulfillOptions;
-import com.microsoft.playwright.options.Cookie;
-import com.microsoft.playwright.options.LoadState;
-import com.microsoft.playwright.options.ScreenshotAnimations;
-import com.microsoft.playwright.options.ScreenshotType;
-import com.microsoft.playwright.options.WaitForSelectorState;
+
+import okhttp3.MediaType;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.sse.EventSource;
+import okhttp3.sse.EventSourceListener;
+import okhttp3.sse.EventSources;
 
 import de.gnampf.syncusgnampfus.KeyValue;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJob;
@@ -44,13 +39,25 @@ import de.willuhn.jameica.hbci.synchronize.SynchronizeBackend;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.logging.Level;
 import de.willuhn.util.ApplicationException;
-import io.github.kihdev.playwright.stealth4j.Stealth4j;
-import io.github.kihdev.playwright.stealth4j.Stealth4jConfig;
 
 
 public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {
 	private static SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+
+	private static final String AMEX_HEADER_1       = decodeItem("Y29tLmFtZXJpY2FuZXhwcmVzcy5hbmRyb2lkLmFjY3RzdmNzLmRl");
+	private static final String AMEX_HEADER_2  = decodeItem("Ny4yOS4w");
+	private static final String AMEX_HEADER_3     = decodeItem("QU1FWA==");
+	private static final String AMEX_HEADER_4   = decodeItem("ZGU=");
+	private static final String AMEX_HEADER_5      = decodeItem("ODU3ZjI1ODFk");
+	private static final String AMEX_HEADER_6       = decodeItem("ZGUtREU=");
+	private static final String AMEX_HEADER_7   = decodeItem("MTQ=");
+	private static final String AMEX_HEADER_8 = decodeItem("c2Ftc3VuZw==");
+	private static final String AMEX_HEADER_9 = decodeItem("U00tUzkxMUI=");
+	private static final String AMEX_HEADER_10  = decodeItem("ZG0xcQ==");
+	private static final String AMEX_HEADER_11   =
+		"Android/" + AMEX_HEADER_7 + " " + AMEX_HEADER_1 + "/" + AMEX_HEADER_2 + " " + AMEX_HEADER_6
+		+ " " + AMEX_HEADER_9.replace(' ', '_');
 
 	@Resource
 	private AMEXSynchronizeBackend backend = null;
@@ -58,170 +65,267 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	@Override
 	protected SynchronizeBackend getBackend() { return backend; }
 
-	private AMEXRequestInterceptor GetCorrelationId(Page pwPage, Konto konto, String user, String passwort) throws Exception 
+	private WebResult MobileLogin(Konto konto, String user, String passwort) throws Exception
 	{
-		log(Level.INFO, "Ermittlung CorrelationId gestartet");
-		var interceptor = new AMEXRequestInterceptor();
+		log(Level.INFO, "Mobiler Login gestartet");
+		mobileCookieJar.clear();
 
-		var responseHandler = new Consumer<Response>() 
+		// DeviceID und InstanceID aus gespeicherten Cookies lesen oder neu erzeugen.
+		// Beide müssen über Läufe hinweg stabil bleiben, damit das Gerät wiedererkannt wird
+		String deviceId = null;
+		String instanceId = null;
+		var cookiesJSON = new JSONArray(konto.getMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, "[]"));
+		for (var c : cookiesJSON)
 		{
-			@Override
-			public void accept(Response r) {
-				if (r.url().endsWith(decodeItem("L215Y2EvbG9nb24vZW1lYS9hY3Rpb24vbG9naW4=")) && "POST".equals(r.request().method()))
-				{
-					if (r.status() == 403)
-					{
-						log(Level.WARN, "403 beim Login erhalten");
-						interceptor.errorCount++;
-					}
-					else if (r.status() == 200)
-					{
-						interceptor.Response = new WebResult(r.status(), r.text(), null, null);
-						permanentHeaders.clear();
-						
-						r.request().headersArray().forEach(h -> 
-						{
-							var key = h.name.toLowerCase().trim();
-							if ("one-data-correlation-id".equals(key))
-							{
-								permanentHeaders.add(new KeyValue<>(h.name, h.value));
-							}
-						});
-						log(Level.INFO, "Login ok: " + r.text());
-					}
-					else
-					{
-						log(Level.INFO, "Login-Status ist " + r.status() + " f\u00FCr url " + r.url());
-						interceptor.errorCount++;
-					}
-				}
-			}
-		};
-		
-		var errorHandler = new Consumer<Request>()
-		{
-			@Override
-			public void accept(Request request)
+			var cookieJSON = (JSONObject) c;
+			var name = cookieJSON.optString("name");
+			if ("device-id".equals(name))
 			{
-				if (request.url().endsWith(decodeItem("L215Y2EvbG9nb24vZW1lYS9hY3Rpb24vbG9naW4=")) && "POST".equals(request.method()))
-				{
-					log(Level.INFO, "Fehler beim Login erhalten: " + request.failure());
-					interceptor.errorCount++;
-				}			
+				deviceId = cookieJSON.optString("value");
 			}
-		};
-
-		pwPage.onRequestFailed(errorHandler); 
-		pwPage.onResponse(responseHandler);
-		var loadFinished = new Object() { public boolean value = false; };
-		pwPage.route(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hY3Rpdml0eS9yZWNlbnQq"), route -> 
-		{
-			log(Level.INFO, "Recent called");
-			if ("GET".equals(route.request().method()))
+			else if ("instance-id".equals(name))
 			{
-				loadFinished.value = true;
-				log(Level.INFO, "Recent called, load finished");
+				instanceId = cookieJSON.optString("value");
 			}
-			route.resume();
-		});
-		pwPage.route(decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9SZWFkQXV0aGVudGljYXRpb25DaGFsbGVuZ2VzLnYz"), route -> 
-		{
-			log(Level.INFO, "Challenges called");
-			if ("POST".equals(route.request().method()))
-			{
-				log(Level.INFO, "Challenges called, load finished");
-				route.fulfill(new FulfillOptions().setBody("{\"challenge\":\"(OTP_SMS | OTP_EMAIL)\",\"challengeQuestions\":[{\"category\":\"OTP_SMS\",\"format\":\"string\",\"challengeOptions\":[{\"maskedValue\":\"dummy\",\"encryptedValue\":\"\",\"type\":\"OTP\"}]},{\"category\":\"OTP_EMAIL\",\"format\":\"string\",\"challengeOptions\":[{\"maskedValue\":\"dummy@dummy\",\"encryptedValue\":\"\",\"type\":\"OTP\"}]}]}"));
-				loadFinished.value = true;
-			}
-			else
-			{
-				route.resume();
-			}
-		});
-
-		pwPage.navigate(decodeItem("aHR0cHM6Ly93d3cuYW1lcmljYW5leHByZXNzLmNvbS9kZS1kZS9hY2NvdW50L2xvZ2luP0Rlc3RQYWdlPWh0dHBzJTNBJTJGJTJGZ2xvYmFsLmFtZXJpY2FuZXhwcmVzcy5jb20lMkZhY3Rpdml0eSUyRnJlY2VudCUzRmFwcHY1JTNEZmFsc2U="));
-		var userInput = pwPage.getByTestId("userid-input");
-		try 
-		{
-			userInput.waitFor(new WaitForOptions().setTimeout(1000));
-		} catch (Exception e)
-		{
-			pwPage.reload();
-			userInput = pwPage.getByTestId("userid-input");
 		}
-		
-		var cookieBanner = pwPage.getByTestId("granular-banner-button-accept-all");
-		if (cookieBanner != null)
+		var rnd = new java.security.SecureRandom();
+		if (deviceId == null || deviceId.isBlank() || deviceId.length() != 16)
 		{
-			try 
-			{
-				cookieBanner.waitFor(new WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(5000));
-				if (cookieBanner.count() > 0) 
-				{
-					cookieBanner.click();
-				}
-			} 
-			catch (com.microsoft.playwright.TimeoutError e) { }
-		}
-
-		userInput.fill(user); 
-		pwPage.getByTestId("password-input").fill(passwort); 
-		pwPage.getByTestId("submit-button").click();
-
-		var scOptions = new ScreenshotOptions().setTimeout(1000).setAnimations(ScreenshotAnimations.DISABLED).setFullPage(false).setOmitBackground(true).setType(ScreenshotType.JPEG);
-		int timeout = 600;
-		while (interceptor.Response == null && interceptor.errorCount < 5 && timeout-- > 0)
-		{
-			try 
-			{
-				pwPage.screenshot(scOptions);
-			}
-			catch (Exception e)
-			{
-				log(Level.DEBUG, "Screenshot meldet " + e);
-			}
-			Thread.sleep(100);
-		}
-
-		if (interceptor.errorCount >= 5)
-		{
-			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "" + (Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) + 1));
-			throw new ApplicationException("Login fehlgeschlagen wegen technischer Probleme, bitte nach einigen Stunden erneut probieren");
+			deviceId = String.format("%016x", rnd.nextLong());
+			log(Level.INFO, "Neue DeviceID erzeugt");
 		}
 		else
 		{
-			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0");
+			log(Level.INFO, "Vorhandene DeviceID verwendet");
 		}
-		
-		if (interceptor.Response == null)	
+		if (instanceId == null || instanceId.isBlank())
 		{
-			throw new ApplicationException("Timeout beim Ermitteln der CorrelationId");
+			byte[] ib = new byte[16]; rnd.nextBytes(ib);
+			instanceId = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ib);
+			log(Level.INFO, "Neue InstanceID erzeugt");
 		}
 
-		pwPage.offResponse(responseHandler);
-		pwPage.offRequestFailed(errorHandler);
-		pwPage.waitForLoadState();
-		while (!loadFinished.value && timeout-- > 0)
-		{
-			try 
-			{
-				pwPage.screenshot(scOptions);
-			}
-			catch (Exception e)
-			{
-				log(Level.DEBUG, "Screenshot meldet " + e);
-			}
-			Thread.sleep(100);
-		}
-		pwPage.unroute(decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9SZWFkQXV0aGVudGljYXRpb25DaGFsbGVuZ2VzLnYz"));
-		pwPage.unroute(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hY3Rpdml0eS9yZWNlbnQq")); 
+		final String finalDeviceId = deviceId;
+		final String finalInstanceId = instanceId;
+		final String processId = UUID.randomUUID().toString();
 
-		return interceptor;
+		long nowMillis = System.currentTimeMillis();
+		var tz = java.util.TimeZone.getDefault();
+		var isoUtc = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+		isoUtc.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+		var headers = new ArrayList<KeyValue<String, String>>();
+		headers.add(new KeyValue<>(decodeItem("WC1TcGFuUmVsYXk="),                 "LOGIN_PROCESS"));
+		headers.add(new KeyValue<>("Accept",                      "application/json"));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtdGltZXpvbmVvZmZzZXQ="),        String.valueOf(tz.getOffset(nowMillis))));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtcHVibGljLWd1aWQ="),           "UNAVAILABLE"));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtb3M="),                    "Android"));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtcmVxdWVzdC1pZA=="),            UUID.randomUUID().toString()));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZ2l0LXNoYQ=="),               AMEX_HEADER_5));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtbWFudWZhY3R1cmVy"),          AMEX_HEADER_8));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLXRpbWU="),           isoUtc.format(new java.util.Date(nowMillis))));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLXRpbWV6b25lLW5hbWU="),  java.time.ZoneId.systemDefault().getId()));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtbG9jYWxlcw=="),               decodeItem("eC1heHAtbG9jYWxlcw==") + ": " + AMEX_HEADER_6));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLWlk"),                AMEX_HEADER_1));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLXZlcnNpb24="),           AMEX_HEADER_2));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLW5hbWU="),              AMEX_HEADER_3));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtaW5zdGFuY2UtaWQ="),           finalInstanceId));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLWNvZGUtbmFtZQ=="),      AMEX_HEADER_10));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLWlk"),             finalDeviceId));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLW1vZGVs"),          AMEX_HEADER_9));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtb3MtdmVyc2lvbg=="),            AMEX_HEADER_7));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLW1hcmtldA=="),            AMEX_HEADER_4));
+		headers.add(new KeyValue<>("User-Agent",                  AMEX_HEADER_11));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtcHJvY2Vzcy1pZA=="),            processId));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtcmVxdWVzdC1zZXF1ZW5jZQ=="),      "1"));
+
+		var mobileLoginCookies = new ArrayList<String[]>();
+
+		var cardArtRequest = new JSONArray();
+		var cardArt = new JSONObject();
+		cardArt.put("minimumWidth", 1490);
+		cardArt.put("tag", "big-image");
+		cardArtRequest.put(cardArt);
+
+		var userIdLogin = new JSONObject();
+		userIdLogin.put("userId", user);
+		userIdLogin.put("password", passwort);
+		userIdLogin.put("rememberMeFlag", true);
+		var loginCredentials = new JSONObject();
+		loginCredentials.put("userIdLogin", userIdLogin);
+
+		var loginBody = new JSONObject();
+		loginBody.put("loginCredentials", loginCredentials);
+		loginBody.put("cardArtRequest", cardArtRequest);
+
+		log(Level.INFO, "Sende mobilen Login-Request");
+		var loginResult = mobileHttpRequest(
+			decodeItem("aHR0cHM6Ly9tb2JpbGVvbmUuYW1lcmljYW5leHByZXNzLmNvbS9tb2JpbGVvbmUvbXNsL3NlcnZpY2VzL2FjY291bnRzZXJ2aWNpbmcvdjEvbG9naW5zdW1tYXJ5"),
+			"POST", headers, "application/json; charset=UTF-8", loginBody.toString(), mobileLoginCookies, null);
+
+		int loginStatus = Integer.parseInt(loginResult[0]);
+		String loginBody2 = loginResult[1];
+		log(Level.INFO, "Mobiler Login-Status: " + loginStatus);
+		log(Level.INFO, "Mobiler Login-Response: " + loginBody2);
+
+		if (loginStatus == 403)
+		{
+			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "" + (Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) + 1));
+			throw new ApplicationException("Login fehlgeschlagen wegen technischer Probleme (403), bitte nach einigen Stunden erneut probieren");
+		}
+		if (loginStatus != 200)
+		{
+			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "" + (Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) + 1));
+			throw new ApplicationException("Mobiler Login fehlgeschlagen, HTTP-Status: " + loginStatus + " - " + loginBody2);
+		}
+
+		var loginJson = new JSONObject(loginBody2);
+
+		// Fehlercodes prüfen 
+		var statusObj = loginJson.optJSONObject("status");
+		boolean success = statusObj != null && statusObj.optBoolean("success");
+		if (!success)
+		{
+			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "" + (Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) + 1));
+			String reportingCode = statusObj != null ? statusObj.optString("reportingCode", "") : "";
+			String message = statusObj != null ? statusObj.optString("message", "") : "";
+			log(Level.INFO, "Mobiler Login abgelehnt: reportingCode=" + reportingCode
+					+ ", legacyCode=" + (statusObj != null ? statusObj.optString("legacyCode", "") : "")
+					+ ", message=" + message);
+			if ("LOGON1001".equals(reportingCode))
+			{
+				throw new ApplicationException("Login fehlgeschlagen: Benutzername oder Passwort falsch");
+			}
+			if (!message.isBlank())
+			{
+				throw new ApplicationException("Login fehlgeschlagen: " + message);
+			}
+			throw new ApplicationException("Login fehlgeschlagen (Code: " + reportingCode + ")");
+		}
+		konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0");
+
+		var logonData = loginJson.optJSONObject("logonData");
+		if (logonData != null)
+		{
+			String cupcake = logonData.optString("cupcake", null);
+			String gatekeeperCookie = logonData.optString("gateKeeperCookie", null);
+			if (cupcake != null && !cupcake.isBlank())
+			{
+				log(Level.INFO, "Setze blueboxvalues-Cookie");
+				mobileCookieJar.put("blueboxvalues", cupcake);
+			}
+			if (gatekeeperCookie != null && !gatekeeperCookie.isBlank())
+			{
+				log(Level.INFO, "Setze gatekeeper-Cookie");
+				mobileCookieJar.put("gatekeeper", gatekeeperCookie);
+			}
+		}
+		// device-id ebenfalls in den okhttp-Jar (für den browserlosen Datenabruf)
+		mobileCookieJar.put("device-id", finalDeviceId);
+		mobileCookieJar.put("instance-id", finalInstanceId);
+
+		// device-id- und instance-id-Cookie setzen, damit der nächste Login sofort als
+		// bekanntes Gerät erkannt wird und dieselbe Instance-ID wiederverwendet wird.
+		// (Werden am Ende von process() mit in META_DEVICECOOKIES persistiert.)
+
+		permanentHeaders.clear();
+
+		return new WebResult(loginStatus, loginBody2, null);
 	}
 	
-	/**
-	 * @see org.jameica.hibiscus.sync.example.ExampleSynchronizeJob#execute()
-	 */
+	private String[] streamingLogin(String url, List<KeyValue<String, String>> headers,
+			String body, List<String[]> outSetCookies) throws Exception
+	{
+		Request.Builder reqBuilder = new Request.Builder().url(url);
+		if (headers != null)
+		{
+			for (var h : headers)
+			{
+				reqBuilder.header(h.getKey(), h.getValue());
+			}
+		}
+		if (!mobileCookieJar.isEmpty())
+		{
+			var cookieHeader = new StringBuilder();
+			for (var entry : mobileCookieJar.entrySet())
+			{
+				if (cookieHeader.length() > 0) cookieHeader.append("; ");
+				cookieHeader.append(entry.getKey()).append("=").append(entry.getValue());
+			}
+			reqBuilder.header("Cookie", cookieHeader.toString());
+		}
+		MediaType mt = MediaType.parse("application/json; charset=UTF-8");
+		reqBuilder.post(RequestBody.create(body.getBytes(StandardCharsets.UTF_8), mt));
+		Request request = reqBuilder.build();
+
+		final java.util.concurrent.atomic.AtomicReference<String> loginJson = new java.util.concurrent.atomic.AtomicReference<>();
+		final java.util.concurrent.atomic.AtomicReference<String[]> httpError = new java.util.concurrent.atomic.AtomicReference<>();
+		final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+
+		EventSource eventSource = EventSources.createFactory(mobileClient()).newEventSource(request, new EventSourceListener()
+		{
+			@Override
+			public void onOpen(EventSource es, Response response)
+			{
+				for (String setCookieVal : response.headers("Set-Cookie"))
+				{
+					String nameValue = setCookieVal.split(";")[0].trim();
+					int eq = nameValue.indexOf('=');
+					if (eq > 0)
+					{
+						String cName  = nameValue.substring(0, eq).trim();
+						String cValue = nameValue.substring(eq + 1).trim();
+						mobileCookieJar.put(cName, cValue);
+						if (outSetCookies != null) outSetCookies.add(new String[]{ cName, cValue });
+					}
+				}
+			}
+
+			@Override
+			public void onEvent(EventSource es, String id, String type, String data)
+			{
+				log(Level.INFO, "SSE-Event type=" + type + ", len=" + (data != null ? data.length() : 0));
+				if (data == null || data.isBlank()) return;
+				// Login-Antwort erkennen (Erfolg: logonData; Ablehnung: reportingCode/twoStepLogin)
+				boolean isLogin = data.contains("\"logonData\"")
+						|| data.contains("\"reportingCode\"")
+						|| data.contains("\"twoStepLogin\"");
+				if (isLogin && loginJson.compareAndSet(null, data))
+				{
+					es.cancel();
+					latch.countDown();
+				}
+			}
+
+			@Override
+			public void onFailure(EventSource es, Throwable t, Response response)
+			{
+				if (loginJson.get() == null)
+				{
+					int code = response != null ? response.code() : -1;
+					String rbody = "";
+					try { if (response != null && response.body() != null) rbody = response.body().string(); }
+					catch (Exception ignore) {}
+					if ((rbody == null || rbody.isBlank()) && t != null) rbody = t.toString();
+					httpError.set(new String[]{ String.valueOf(code), rbody });
+				}
+				latch.countDown();
+			}
+
+			@Override
+			public void onClosed(EventSource es)
+			{
+				latch.countDown();
+			}
+		});
+
+		boolean completed = latch.await(45, java.util.concurrent.TimeUnit.SECONDS);
+		eventSource.cancel();
+
+		if (loginJson.get() != null) return new String[]{ "200", loginJson.get() };
+		if (httpError.get() != null) return httpError.get();
+		return new String[]{ "0", "Streaming-Login: keine Login-Antwort erhalten (Timeout=" + !completed + ")" };
+	}
+
 	@Override
 	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
@@ -241,80 +345,36 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		}
 		
 		
-		Browser browser = null;
-		Page page = null;
 		try
 		{
 			ArrayList<Umsatz> neueUmsaetze = new ArrayList<Umsatz>();
 
 			monitor.setPercentComplete(5);
-			Playwright playwright = Playwright.create(); 
-			var headless = "false".equals(konto.getMeta(AMEXSynchronizeBackend.META_NOTHEADLESS,  "false"));
-			var options1 = new BrowserType.LaunchOptions().setHeadless(headless);
-			var proxyConfig = webClient.getOptions().getProxyConfig();
-			if (proxyConfig != null && proxyConfig.getProxyHost() != null)
-			{
-				var proxy = proxyConfig.getProxyScheme()+"://" + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort();
-				options1.setProxy(proxy);
-			}
-			
-			options1.setSlowMo(10);			
-			browser = playwright.firefox().launch(options1);
-
-			var stealthContext = Stealth4j.newStealthContext(browser, new Stealth4jConfig.Builder().navigatorWebDriver(true).chromeLoadTimes(true).chromeApp(true).chromeCsi(true).navigatorPlugins(true).mediaCodecs(true).windowOuterDimensions(true).navigatorUserAgent(true, null).navigatorLanguages(true, List.of("de-DE", "de")).build());
-			stealthContext.setExtraHTTPHeaders(Map.of("DNT", "1"));
-
-			ArrayList<Cookie> pwCookies = new ArrayList<>();
-			if ("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")) && Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) <= 3)
-			{
-				var cookiesJSON = new JSONArray(konto.getMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, "[]"));
-				for (var c : cookiesJSON)
-				{
-					var cookieJSON = (JSONObject)c;
-					var cookie = new Cookie(cookieJSON.getString("name"), cookieJSON.optString("value"));
-					cookie.domain = cookieJSON.optString("domain");
-					cookie.path = cookieJSON.optString("path");
-					cookie.secure = cookieJSON.optBoolean("secure");
-					cookie.httpOnly =  cookieJSON.optBoolean("httpOnly");
-					if (cookieJSON.has("sameSite"))
-					{
-						cookie.sameSite = Enum.valueOf(com.microsoft.playwright.options.SameSiteAttribute.class, cookieJSON.optString("sameSite").toUpperCase());
-					}
-	
-					if (!cookie.name.equals("amexsessioncookie"))
-					{
-						pwCookies.add(cookie);
-					}
-				}
-				stealthContext.addCookies(pwCookies);
-			}
-			else
+			if (!("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")) && Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) <= 3))
 			{
 				konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, null);
 			}
-			page = stealthContext.newPage();
 
-			var interceptor = GetCorrelationId(page, konto, user, passwort);
-			var json = interceptor.Response.getJSONObject();
-			boolean needLogin = interceptor.Response.getJSONObject().optInt("statusCode") != 0;
-			var reAuth = json.optJSONObject("reauth");
-			if (reAuth == null)
-			{
-				log(Level.DEBUG, "Response: " + interceptor.Response.getContent());
-				throw new ApplicationException("Login fehlgeschlagen, Passwort falsch?");
-			}
+		var result = MobileLogin(konto, user, passwort);
 
-			try
-			{
-				page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-				page.navigate(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvdHJhbnNhY3Rpb25zP2xpbWl0PTEwMDAmc3RhdHVzPXBlbmRpbmcmZXh0ZW5kZWRfZGV0YWlscz1tZXJjaGFudA=="));
-				page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-			}
-			catch (Exception e) {}
+		// logonData.reauth aus mobiler Login-Antwort lesen
+		var loginRespJson = result.getJSONObject();
+		var logonDataObj = loginRespJson.optJSONObject("logonData");
+		var reAuth = logonDataObj != null ? logonDataObj.optJSONObject("reauth") : null;
+		// statusCode != 0 bedeutet, dass eine erneute Authentifizierung (2FA) nötig ist
+		boolean needLogin = logonDataObj != null && logonDataObj.optInt("statusCode", 0) != 0;
+		// Für den weiteren Code wird json als Alias auf das logonData-Objekt gesetzt
+		var json = logonDataObj != null ? logonDataObj : loginRespJson;
 
-			var assessmentToken = reAuth.getString("assessmentToken");
-			if (needLogin)
-			{
+		if (needLogin && reAuth == null)
+		{
+			log(Level.DEBUG, "Response: " + result.getContent());
+			throw new ApplicationException("Login fehlgeschlagen, Passwort falsch?");
+		}
+
+		var assessmentToken = reAuth != null ? reAuth.optString("assessmentToken", "") : "";
+		if (needLogin)
+		{
 				var applicationId = reAuth.optString("applicationId");
 				var actionId = reAuth.optString("actionId");
 				var mfaId = reAuth.optString("mfaId");
@@ -331,7 +391,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				var body = json.toString();
 				monitor.setPercentComplete(7);
 
-				var response = doRequest(page, decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9SZWFkQXV0aGVudGljYXRpb25DaGFsbGVuZ2VzLnYz"), HttpMethod.POST, null, "application/json; charset=UTF-8", body, true);
+				var response = doRequest(decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9SZWFkQXV0aGVudGljYXRpb25DaGFsbGVuZ2VzLnYz"), HttpMethod.POST, null, "application/json; charset=UTF-8", body, true);
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
@@ -410,7 +470,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 								)),
 						"userJourneyIdentifier", "aexp.global:create:session"
 						));
-				response = doRequest(page, decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9DcmVhdGVPbmVUaW1lUGFzc2NvZGVEZWxpdmVyeS52Mw=="), HttpMethod.POST, null, "application/json; charset=UTF-8", json.toString(), true);
+				response = doRequest(decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9DcmVhdGVPbmVUaW1lUGFzc2NvZGVEZWxpdmVyeS52Mw=="), HttpMethod.POST, null, "application/json; charset=UTF-8", json.toString(), true);
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
@@ -451,7 +511,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 								"userJourneyIdentifier", "aexp.global:create:session"
 								));
 					}
-					response = doRequest(page, decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9VcGRhdGVBdXRoZW50aWNhdGlvblRva2VuV2l0aENoYWxsZW5nZS52Mw=="), HttpMethod.POST, null, "application/json; charset=UTF-8", json.toString(), true);
+					response = doRequest(decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9VcGRhdGVBdXRoZW50aWNhdGlvblRva2VuV2l0aENoYWxsZW5nZS52Mw=="), HttpMethod.POST, null, "application/json; charset=UTF-8", json.toString(), true);
 					if (response.getHttpStatus()!= 200)
 					{
 						log(Level.DEBUG, "Response: " + response.getContent());
@@ -470,7 +530,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				monitor.setPercentComplete(12);
 
 				var mfaTime = Calendar.getInstance();
-				response = doRequest(page, decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9teWNhL2xvZ29uL2VtZWEvYWN0aW9uL2xvZ2lu"), HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "request_type=login&Face=de_DE&Logon=Logon&version=4&mfaId=" + mfaId + "&b_hour=" + mfaTime.get(Calendar.HOUR_OF_DAY) + "&b_minute=" + mfaTime.get(Calendar.MINUTE) + "&b_second=" + mfaTime.get(Calendar.SECOND) + "&b_dayNumber=" + mfaTime.get(Calendar.DAY_OF_MONTH) + "&b_month=" + mfaTime.get(Calendar.MONTH) + "&b_year=" + mfaTime.get(Calendar.YEAR) + "&b_timeZone="+mfaTime.getTimeZone().getRawOffset()/3600000, true);
+				response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9teWNhL2xvZ29uL2VtZWEvYWN0aW9uL2xvZ2lu"), HttpMethod.POST, null, "application/x-www-form-urlencoded; charset=UTF-8", "request_type=login&Face=de_DE&Logon=Logon&version=4&mfaId=" + mfaId + "&b_hour=" + mfaTime.get(Calendar.HOUR_OF_DAY) + "&b_minute=" + mfaTime.get(Calendar.MINUTE) + "&b_second=" + mfaTime.get(Calendar.SECOND) + "&b_dayNumber=" + mfaTime.get(Calendar.DAY_OF_MONTH) + "&b_month=" + mfaTime.get(Calendar.MONTH) + "&b_year=" + mfaTime.get(Calendar.YEAR) + "&b_timeZone="+mfaTime.getTimeZone().getRawOffset()/3600000, true);
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
@@ -482,7 +542,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 				if (!needLogin && "true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")))
 				{
-					response = doRequest(page, decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9DcmVhdGVUd29GYWN0b3JBdXRoZW50aWNhdGlvbkZvclVzZXIudjE="), HttpMethod.POST, null, "application/json; charset=UTF-8", "[{\"locale\":\"de-DE\",\"trust\":true,\"deviceName\":\"SyncusGnampfus\"}]", true);
+					response = doRequest(decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9DcmVhdGVUd29GYWN0b3JBdXRoZW50aWNhdGlvbkZvclVzZXIudjE="), HttpMethod.POST, null, "application/json; charset=UTF-8", "[{\"locale\":\"de-DE\",\"trust\":true,\"deviceName\":\"" + decodeItem("T25saW5lQmFua2luZw==") + "\"}]", true);
 					if (response.getHttpStatus() != 200)
 					{
 						log(Level.DEBUG, "Response f\u00FCr Remember: " + response.getHttpStatus() + " - " + response.getContent());
@@ -499,19 +559,16 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			if ("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")))
 			{
+				// device-id/instance-id im Konto persistieren, damit sie über Neustarts hinweg
+				// stabil bleiben. mobileCookieJar hält beide nach dem Login.
 				var cookiesJSON = new JSONArray();
-				var allCookies = stealthContext.cookies();
-				for (var cookie : allCookies)
+				for (var name : new String[]{ "device-id", "instance-id" })
 				{
-					var cookieJSON = new JSONObject();
-					cookieJSON.put("domain", cookie.domain);
-					cookieJSON.put("name", cookie.name);
-					cookieJSON.put("value", cookie.value);
-					cookieJSON.put("path", cookie.path);
-					cookieJSON.put("secure", cookie.secure);
-					cookieJSON.put("httpOnly",  cookie.httpOnly);
-					cookieJSON.put("sameSite", cookie.sameSite);
-					cookiesJSON.put(cookieJSON);
+					var value = mobileCookieJar.get(name);
+					if (value != null && !value.isBlank())
+					{
+						cookiesJSON.put(new JSONObject().put("name", name).put("value", value));
+					}
 				}
 				konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, cookiesJSON.toString());
 			}
@@ -523,13 +580,17 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				JSONObject initialStateObj = new JSONObject();
 				try 
 				{
-					var response = doRequest(page, decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hY3Rpdml0eS9yZWNlbnQ/YXBwdjU9ZmFsc2U="), HttpMethod.GET, null, null, null, true);
+					var response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hY3Rpdml0eS9yZWNlbnQ/YXBwdjU9ZmFsc2U="), HttpMethod.GET, null, null, null, true);
 					if (response.getHttpStatus() != 200)
 					{
 						log(Level.DEBUG, "Response: " + response.getContent());
 						throw new ApplicationException("Abfrage Konten fehlgeschlagen, Status = " + response.getHttpStatus());
 					}
 
+					// AccountToken ueber die Seite ermitteln: htmlunit fuehrt die Seiten-JS aus,
+					// die window.__INITIAL_STATE__ aufbaut (kein Inline-Script vorhanden).
+					log(Level.INFO, "Ermittle AccountToken (JS-Ausfuehrung der Seite) - das kann einige Minuten dauern ...");
+					var webClient = getWebClient(null);
 					webClient.getOptions().setJavaScriptEnabled(true);
 					var initialState = webClient.loadHtmlCodeIntoCurrentWindow(response.getContent()).executeJavaScript("window.__INITIAL_STATE__").getJavaScriptResult();
 					if (initialState != null)
@@ -603,7 +664,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			ArrayList<KeyValue<String, String>> header = new ArrayList<>();
 			header.add(new KeyValue<>("account_token", accountToken));
 
-			var response = doRequest(page, decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvYmFsYW5jZXM="), HttpMethod.GET, header, null, null, true);
+			var response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvYmFsYW5jZXM="), HttpMethod.GET, header, null, null, true);
 			if (response.getHttpStatus() != 200)
 			{
 				log(Level.DEBUG, "Response: " + response.getContent());
@@ -631,7 +692,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			if (fetchUmsatz) 
 			{
 				log(Level.INFO, "Hole Reservierungen");
-				response = doRequest(page, decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvdHJhbnNhY3Rpb25zP2xpbWl0PTEwMDAmc3RhdHVzPXBlbmRpbmcmZXh0ZW5kZWRfZGV0YWlscz1tZXJjaGFudA=="), HttpMethod.GET, header, null, null, true);
+				response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvdHJhbnNhY3Rpb25zP2xpbWl0PTEwMDAmc3RhdHVzPXBlbmRpbmcmZXh0ZW5kZWRfZGV0YWlscz1tZXJjaGFudA=="), HttpMethod.GET, header, null, null, true);
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
@@ -645,7 +706,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				monitor.setPercentComplete(35);
 
 				log(Level.INFO, "Hole Buchungsperioden");
-				response = doRequest(page, decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvc3RhdGVtZW50X3BlcmlvZHM="), HttpMethod.GET, header, null, null, true);
+				response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvc3RhdGVtZW50X3BlcmlvZHM="), HttpMethod.GET, header, null, null, true);
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Request: " + response.getContent());
@@ -659,7 +720,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					var period = (JSONObject)periodObj;
 					log(Level.INFO, "Abruf Buchungen " +period.getString("statement_start_date") + " bis " + period.getString("statement_end_date"));
 
-					response = doRequest(page, decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvdHJhbnNhY3Rpb25zP2xpbWl0PTEwMDAmZXh0ZW5kZWRfZGV0YWlscz1tZXJjaGFudCZzdGF0ZW1lbnRfZW5kX2RhdGU9") + period.getString("statement_end_date") + "&status=posted", HttpMethod.GET, header, null, null, true);
+					response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvdHJhbnNhY3Rpb25zP2xpbWl0PTEwMDAmZXh0ZW5kZWRfZGV0YWlscz1tZXJjaGFudCZzdGF0ZW1lbnRfZW5kX2RhdGU9") + period.getString("statement_end_date") + "&status=posted", HttpMethod.GET, header, null, null, true);
 					if (response.getHttpStatus() != 200)
 					{
 						log(Level.DEBUG, "Request: " + response.getContent());
@@ -678,16 +739,9 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		}
 		finally
 		{
-			if (page != null) 
-			{
-				page.navigate(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvdHJhbnNhY3Rpb25zP2xpbWl0PTEwMDAmc3RhdHVzPXBlbmRpbmcmZXh0ZW5kZWRfZGV0YWlscz1tZXJjaGFudA=="));
-				doRequest(page, decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9EZWxldGVVc2VyU2Vzc2lvbi52MQ=="), HttpMethod.GET, null, null, null, true);
-				page.close();
-			}
-			if (browser != null)
-			{
-				browser.close();
-			}
+			// Session serverseitig beenden (Logout) 
+			try { doRequest(decodeItem("aHR0cHM6Ly9mdW5jdGlvbnMuYW1lcmljYW5leHByZXNzLmNvbS9EZWxldGVVc2VyU2Vzc2lvbi52MQ=="), HttpMethod.GET, null, null, null, true); }
+			catch (Exception e) { log(Level.DEBUG, "Logout-Fehler (ignoriert): " + e); }
 		}
 		return true;
 	}

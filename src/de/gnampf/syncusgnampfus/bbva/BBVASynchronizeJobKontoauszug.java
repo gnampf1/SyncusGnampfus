@@ -74,7 +74,6 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				Playwright playwright = Playwright.create(); 
 				var headless = false;
 				var options1 = new BrowserType.LaunchOptions().setHeadless(headless);
-				var proxyConfig = webClient.getOptions().getProxyConfig();
 				if (proxyConfig != null && proxyConfig.getProxyHost() != null)
 				{
 					var proxy = proxyConfig.getProxyScheme()+"://" + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort();
@@ -493,12 +492,12 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 					for (var header : response.getResponseHeader())
 					{
-						if ("authenticationdata".equals(header.getName()))
+						if ("authenticationdata".equals(header.getKey()))
 						{
 							log(Level.DEBUG, "got AuthData");
 							extSearchAuthenticationData = header.getValue();
 						}
-						else if ("authenticationstate".equals(header.getName()))
+						else if ("authenticationstate".equals(header.getKey()))
 						{
 							log(Level.DEBUG, "got AuthState");
 							extSearchAuthenticationState = header.getValue();
@@ -725,7 +724,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	{
 		for (var respHeader : response.getResponseHeader())
 		{
-			if ("tsec".equals(respHeader.getName()))
+			if ("tsec".equals(respHeader.getKey()))
 			{
 					log(Level.DEBUG, "replace tsec");
 					headers.removeIf(p -> p.getKey().compareTo("tsec") == 0);

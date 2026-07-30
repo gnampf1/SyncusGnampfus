@@ -12,6 +12,20 @@
 
   <requires jameica="2.6.0+">
     <import plugin="hibiscus" version="2.6.0+" />
+    <!-- Playwright + stealth4j kommen aus dem separaten Bibliotheks-Plugin "Playwright"
+         (gemeinsame Nutzung, keine doppelten/kollidierenden Playwright-Jars mehr). -->
+    <import plugin="Playwright" version="1.61.0+" />
+    <!-- htmlunit (inkl. seiner transitiven Abhaengigkeiten wie commons-*/httpclient) kommt
+         aus dem bestehenden Plugin "hibiscus.scripting.htmlunit" — wir liefern diese Jars
+         daher nicht selbst mit. -->
+    <import plugin="hibiscus.scripting.htmlunit" version="4.4.0+" />
+    <!-- okhttp (+okio, +okhttp-sse) und Conscrypt aus dem "okhttp"-Bibliotheks-Plugin.
+         Versionsfloor wird beim Build auf die kompilierte okhttp-Version gesetzt (siehe init). -->
+    <import plugin="okhttp" version="5.4.0+" />
+    <!-- org.json aus dem "json"-Bibliotheks-Plugin (bekannte Konfliktquelle -> nur EINE
+         gemeinsame Version). Niedriger Floor: wir kompilieren gegen unsere Version, nutzen
+         zur Laufzeit die (neuere) des Plugins. -->
+    <import plugin="org.json" version="20190722+" />
   </requires>
 
 

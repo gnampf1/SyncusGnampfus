@@ -1,7 +1,7 @@
 package de.gnampf.syncusgnampfus.scalablecapital;
 
 
-// aktion bei umsätzen
+// aktion bei umsaetzen
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -76,24 +76,20 @@ public class ScalablecapitalSynchronizeJobKontoauszug extends SyncusGnampfusSync
 				GraphqlEnvelope portfolioInventory = portfolioInventoryClient.fetchPortfolioInventory(session);
 			} catch (Exception e) {
 				// Session moeglicherweise ungueltig
-				log(Level.INFO, "Session möglichweise ungülig. Erzwinge neuen Login.");
+				log(Level.INFO, "Session m\u00F6glichweise ung\u00FClig. Erzwinge neuen Login.");
 				session = null;
 			}
 		}
 		// Login, falls keine Session vorhanden ist
 		if (session == null) {
-			try (Playwright playwright = Playwright.create()) {
-
-				ScalableCapitalLogin login = new ScalableCapitalLogin();
-				session = login.runLogin(playwright, user, passwort);
-			}
+			session = login(user, passwort);
 		}
 		sessions.put(user + passwort, session);
 		// Save Debug-Information
 		if (konto.getMeta(ScalablecapitalSynchronizeBackend.JSONDATA, "").equals("true")) {
 			saveJsonResponses(session);
 		}
-		// Je nach Kontotyp, führe die passende Unteraktion aus
+		// Je nach Kontotyp, fuehre die passende Unteraktion aus
 		if (KontoType.SPAR.getValue() == konto.getAccountType()) {
 			return sparkonto(session, konto, fetchSaldo, fetchUmsatz);
 		}
@@ -107,7 +103,30 @@ public class ScalablecapitalSynchronizeJobKontoauszug extends SyncusGnampfusSync
 	}
 
 	/**
-	 * Speichert für Debug-Zwecke die angeforderten Daten als JSON-Dateien ab.
+	 * Login: zuerst browserlos ueber den Auth0-OIDC-Flow (okhttp). Falls das nicht durchlaeuft
+	 * (z.B. Bot-Challenge/Captcha), Fallback auf den bisherigen Browser-Login (Playwright).
+	 */
+	private Session login(String user, String passwort) throws Exception {
+		java.net.Proxy proxy = null;
+		if (proxyConfig != null && proxyConfig.getProxyHost() != null && !proxyConfig.getProxyHost().isBlank()) {
+			proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP,
+					new java.net.InetSocketAddress(proxyConfig.getProxyHost(), proxyConfig.getProxyPort()));
+		}
+		try {
+			Session s = ScalableCapitalOkLogin.login(user, passwort, proxy, msg -> log(Level.INFO, msg));
+			log(Level.INFO, "Scalable Capital: browserloser Login erfolgreich");
+			return s;
+		} catch (ScalableCapitalOkLogin.FallbackNeededException e) {
+			log(Level.INFO, "Scalable Capital: browserloser Login nicht moeglich (" + e.getMessage()
+					+ "), Fallback auf Browser-Login");
+			try (Playwright playwright = Playwright.create()) {
+				return new ScalableCapitalLogin().runLogin(playwright, user, passwort);
+			}
+		}
+	}
+
+	/**
+	 * Speichert fuer Debug-Zwecke die angeforderten Daten als JSON-Dateien ab.
 	 * 
 	 * @param session
 	 * @throws IOException
@@ -144,7 +163,7 @@ public class ScalablecapitalSynchronizeJobKontoauszug extends SyncusGnampfusSync
 	 * @param session     Session
 	 * @param konto       Konto
 	 * @param fetchSaldo  Saldo abrufen?
-	 * @param fetchUmsatz Umsï¿½tze abrufen?
+	 * @param fetchUmsatz Umsaetze abrufen?
 	 * @return erfolgreich?
 	 * @throws IOException
 	 * @throws InterruptedException
@@ -211,7 +230,7 @@ public class ScalablecapitalSynchronizeJobKontoauszug extends SyncusGnampfusSync
 	 * @param session     Session
 	 * @param konto       Konto
 	 * @param fetchSaldo  Saldo abrufen?
-	 * @param fetchUmsatz Umsï¿½tze abrufen?
+	 * @param fetchUmsatz Umsaetze abrufen?
 	 * @return erfolgreich?
 	 * @throws IOException
 	 * @throws InterruptedException
@@ -328,7 +347,7 @@ public class ScalablecapitalSynchronizeJobKontoauszug extends SyncusGnampfusSync
 					continue;
 				}
 
-				// Datenpaket für Depotviewer zusammenstellen
+				// Datenpaket fuer Depotviewer zusammenstellen
 				HashMap<String, Object> transaction = new HashMap<>();
 				Date d = sdf.parse(x.lastEventDateTime);
 				transaction.put("datetime", d);

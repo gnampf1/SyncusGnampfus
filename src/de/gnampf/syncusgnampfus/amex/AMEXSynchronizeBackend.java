@@ -50,10 +50,6 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 					konto.setMeta(META_MULTICARD, "false");
 				}
 			}
-			if (konto.getMeta(META_NOTHEADLESS,  null) == null)
-			{
-				konto.setMeta(META_NOTHEADLESS, "false");
-			}
 			if (konto.getMeta(META_TRUST, null) == null)
 			{
 				konto.setMeta(META_TRUST, "true");
@@ -67,7 +63,6 @@ public class AMEXSynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 			result.add(META_OTPTYPE);
 			result.add(META_TRUST + "(true/false)");
 			result.add(META_MULTICARD + "(true/false)");
-			result.add(META_NOTHEADLESS + "(true/false)");
 			result.add(META_ACCOUNTTOKEN);
 			return result;
 		} 

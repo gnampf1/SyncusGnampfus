@@ -2,8 +2,6 @@ package de.gnampf.syncusgnampfus;
 
 import java.util.List;
 
-import org.htmlunit.Page;
-import org.htmlunit.util.NameValuePair;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -12,20 +10,13 @@ public class WebResult
 	private String content;
 	private int httpStatus;
 	private JSONObject json;
-	private List<NameValuePair> responseHeader;
-	private Page page;
+	private List<KeyValue<String, String>> responseHeader;
 
-	public WebResult(int httpStatus, String content, List<NameValuePair> responseHeader, Page page)
+	public WebResult(int httpStatus, String content, List<KeyValue<String, String>> responseHeader)
 	{
 		this.httpStatus = httpStatus;
 		this.content = content;
 		this.responseHeader = responseHeader;
-		this.page = page;
-	}
-
-	public Page getPage() 
-	{
-		return page;
 	}
 	
 	public String getContent() 
@@ -68,7 +59,7 @@ public class WebResult
 		return new JSONArray();
 	}
 	
-	public List<NameValuePair> getResponseHeader()
+	public List<KeyValue<String, String>> getResponseHeader()
 	{
 		return responseHeader;
 	}

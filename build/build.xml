@@ -7,16 +7,42 @@
     </classpath>
   </taskdef>
 
+  <!-- Neueste Playwright-Version von Maven Central ermitteln — dieselbe, die auch das
+       separate "Playwright"-Bibliotheks-Plugin buendelt. Wird zum Kompilieren verwendet und
+       als Mindest-Anforderung in plugin.xml gesetzt (siehe init), damit Compile- und
+       Laufzeit-Version zusammenpassen. -->
+  <get src="https://repo1.maven.org/maven2/com/microsoft/playwright/playwright/maven-metadata.xml"
+       dest="build/pw-metadata.xml" usetimestamp="false" />
+  <xmlproperty file="build/pw-metadata.xml" prefix="pw" collapseattributes="true" />
+  <property name="playwright.version" value="${pw.metadata.versioning.release}" />
+  <echo message="Playwright-Version (compile): ${playwright.version}" />
+
+  <!-- Neueste okhttp- und Conscrypt-Version — dieselben, die das "okhttp"-Bibliotheks-Plugin
+       buendelt. Zum Kompilieren verwendet und als Mindest-Anforderung in plugin.xml (init). -->
+  <get src="https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp/maven-metadata.xml"
+       dest="build/okhttp-metadata.xml" usetimestamp="false" />
+  <xmlproperty file="build/okhttp-metadata.xml" prefix="ok" collapseattributes="true" />
+  <property name="okhttp.version" value="${ok.metadata.versioning.release}" />
+  <get src="https://repo1.maven.org/maven2/org/conscrypt/conscrypt-openjdk-uber/maven-metadata.xml"
+       dest="build/conscrypt-metadata.xml" usetimestamp="false" />
+  <xmlproperty file="build/conscrypt-metadata.xml" prefix="cs" collapseattributes="true" />
+  <property name="conscrypt.version" value="${cs.metadata.versioning.release}" />
+  <echo message="okhttp-Version (compile): ${okhttp.version} / conscrypt ${conscrypt.version}" />
 
   <resolver:resolve failOnMissingAttachments="false">
     <resolver:dependencies>
       <resolver:dependency groupId="org.json" artifactId="json" version="20190722" />
       <resolver:dependency groupId="org.htmlunit" artifactId="htmlunit" version="4.4.0" />
-      <resolver:dependency groupId="com.microsoft.playwright" artifactId="playwright" version="1.60.0" />
+      <resolver:dependency groupId="com.microsoft.playwright" artifactId="playwright" version="${playwright.version}" />
 <!-- Maven-Version ist für Java >17 compiliert, daher nicht nutzbar -->
 <!--      <resolver:dependency groupId="io.github.kihdev.playwright-stealth-4j" artifactId="playwright-stealth-4j" version="1.0.0" />-->
       <resolver:dependency groupId="org.jetbrains.kotlin" artifactId="kotlin-stdlib" version="2.2.0" />
       <resolver:dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.21.2"/>
+      <!-- okhttp/conscrypt: neueste Version zum Kompilieren (Laufzeit liefert das okhttp-Plugin).
+           org.json bleibt bewusst auf der bestehenden Version (siehe oben). -->
+      <resolver:dependency groupId="com.squareup.okhttp3" artifactId="okhttp" version="${okhttp.version}" />
+      <resolver:dependency groupId="com.squareup.okhttp3" artifactId="okhttp-sse" version="${okhttp.version}" />
+      <resolver:dependency groupId="org.conscrypt" artifactId="conscrypt-openjdk-uber" version="${conscrypt.version}" />
     </resolver:dependencies>
     <resolver:files refid="src.files" dir="lib" layout="{artifactId}-{classifier}.{extension}"/>
   </resolver:resolve>
@@ -26,6 +52,17 @@
     <property environment="env" />
     <property name="build.dir" value="build" />
     <buildnumber file="${build.dir}/BUILD" />
+
+    <!-- Playwright-/okhttp-Import-Anforderung auf die tatsaechlich verwendete Version setzen,
+         damit zur Laufzeit kein aelteres Bibliotheks-Plugin als beim Kompilieren geladen wird.
+         (json bleibt bei seinem festen, niedrigen Floor.) -->
+    <replaceregexp file="plugin.xml" flags="g"
+        match="(&lt;import plugin=&quot;Playwright&quot; version=)&quot;[^&quot;]*&quot;"
+        replace="\1&quot;${playwright.version}+&quot;" />
+    <replaceregexp file="plugin.xml" flags="g"
+        match="(&lt;import plugin=&quot;okhttp&quot; version=)&quot;[^&quot;]*&quot;"
+        replace="\1&quot;${okhttp.version}+&quot;" />
+
     <xmlproperty file="plugin.xml" collapseattributes="true"/>
 
     <!-- create tag -->
@@ -124,6 +161,40 @@
       <fileset dir="${lib.dir}">
         <exclude name="**/*ant*.jar" />
         <exclude name="**/maven-resolver-ant-tasks*.jar" />
+        <!-- Playwright + Browser-Treiber + stealth4j + Kotlin-Runtime werden vom separaten
+             "Playwright"-Bibliotheks-Plugin bereitgestellt (via jameica-import; dessen Jars
+             liegen im gemeinsamen ClassLoader). Nur zum Kompilieren in lib/ vorhanden, NICHT
+             mit ausliefern (spart u.a. das 200-MB-driver-bundle und vermeidet Versions-
+             konflikte zwischen Plugins). Kotlin-stdlib gehoert zu Playwright, weil stealth4j
+             (und okhttp) die Kotlin-Runtime brauchen. -->
+        <exclude name="**/playwright*.jar" />
+        <exclude name="**/driver*.jar" />
+        <exclude name="**/kotlin-stdlib*.jar" />
+        <!-- htmlunit inkl. seiner transitiven Abhaengigkeiten kommt aus dem Plugin
+             "hibiscus.scripting.htmlunit" (importiert). Nichts davon selbst mitliefern. -->
+        <exclude name="**/htmlunit*.jar" />
+        <exclude name="**/neko-htmlunit*.jar" />
+        <exclude name="**/commons-*.jar" />
+        <exclude name="**/httpclient*.jar" />
+        <exclude name="**/httpcore*.jar" />
+        <exclude name="**/httpmime*.jar" />
+        <exclude name="**/dec.jar" />
+        <!-- Jackson liefert das Hibiscus-Core-Plugin mit (immer geladen, da importiert); wir
+             kompilieren gegen unsere Version, liefern sie aber nicht mit und nutzen zur
+             Laufzeit die von Hibiscus (nur Basis-ObjectMapper-API -> versionsunkritisch). -->
+        <exclude name="**/jackson-*.jar" />
+        <!-- okhttp (+okio, +okhttp-sse) und Conscrypt kommen aus dem "okhttp"-Plugin,
+             org.json aus dem "json"-Plugin. Nur zum Kompilieren in lib/, nicht ausliefern. -->
+        <exclude name="**/okhttp*.jar" />
+        <exclude name="**/okio*.jar" />
+        <exclude name="**/conscrypt*.jar" />
+        <exclude name="**/json.jar" />
+        <!-- Nicht benoetigte transitive Reste (nur Compile-Zeit-Annotationen bzw. von anderen
+             Bibliotheks-Plugins bereitgestellt) — nicht ausliefern. -->
+        <exclude name="**/gson*.jar" />
+        <exclude name="**/annotations*.jar" />
+        <exclude name="**/error_prone_annotations*.jar" />
+        <exclude name="**/opentest4j*.jar" />
       </fileset>
     </copy>
 

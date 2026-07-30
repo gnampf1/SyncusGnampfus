@@ -1,15 +1,49 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
 	<classpathentry kind="src" path="src"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.7">
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-17">
 		<attributes>
 			<attribute name="module" value="true"/>
 		</attributes>
 	</classpathentry>
 	<classpathentry combineaccessrules="false" kind="src" path="/hibiscus"/>
-	<classpathentry kind="lib" path="lib/htmlunit.jar"/>
+	<classpathentry kind="lib" path="lib/annotations.jar"/>
+	<classpathentry kind="lib" path="lib/commons-codec.jar"/>
+	<classpathentry kind="lib" path="lib/commons-io.jar"/>
+	<classpathentry kind="lib" path="lib/commons-lang3.jar"/>
+	<classpathentry kind="lib" path="lib/commons-logging.jar"/>
+	<classpathentry kind="lib" path="lib/commons-net.jar"/>
+	<classpathentry kind="lib" path="lib/commons-text.jar"/>
+	<classpathentry kind="lib" path="lib/conscrypt-openjdk-uber.jar"/>
+	<classpathentry kind="lib" path="lib/dec.jar"/>
+	<classpathentry kind="lib" path="lib/driver-bundle.jar"/>
+	<classpathentry kind="lib" path="lib/driver.jar"/>
+	<classpathentry kind="lib" path="lib/error_prone_annotations.jar"/>
+	<classpathentry kind="lib" path="lib/gson.jar"/>
 	<classpathentry kind="lib" path="lib/htmlunit-core-js.jar"/>
+	<classpathentry kind="lib" path="lib/htmlunit-csp.jar"/>
+	<classpathentry kind="lib" path="lib/htmlunit-cssparser.jar"/>
+	<classpathentry kind="lib" path="lib/htmlunit.jar"/>
+	<classpathentry kind="lib" path="lib/htmlunit-websocket-client.jar"/>
+	<classpathentry kind="lib" path="lib/htmlunit-xpath.jar"/>
+	<classpathentry kind="lib" path="lib/httpclient.jar"/>
+	<classpathentry kind="lib" path="lib/httpcore.jar"/>
+	<classpathentry kind="lib" path="lib/httpmime.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-annotations.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-core.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-databind.jar"/>
 	<classpathentry kind="lib" path="lib/json.jar"/>
+	<classpathentry kind="lib" path="lib/kotlin-stdlib-common.jar"/>
+	<classpathentry kind="lib" path="lib/kotlin-stdlib.jar"/>
+	<classpathentry kind="lib" path="lib/kotlin-stdlib-jdk7.jar"/>
+	<classpathentry kind="lib" path="lib/kotlin-stdlib-jdk8.jar"/>
+	<classpathentry kind="lib" path="lib/neko-htmlunit.jar"/>
+	<classpathentry kind="lib" path="lib/okhttp.jar"/>
+	<classpathentry kind="lib" path="lib/okhttp-jvm.jar"/>
+	<classpathentry kind="lib" path="lib/okhttp-sse.jar"/>
+	<classpathentry kind="lib" path="lib/okio.jar"/>
+	<classpathentry kind="lib" path="lib/okio-jvm.jar"/>
+	<classpathentry kind="lib" path="lib/opentest4j.jar"/>
 	<classpathentry kind="lib" path="lib/playwright.jar"/>
 	<classpathentry kind="lib" path="lib/playwright-stealth-4j.jar"/>
 	<classpathentry kind="output" path="bin"/>

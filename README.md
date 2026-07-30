@@ -35,12 +35,12 @@ Für das Haupt/Transferkonto: die Unterkontonummer leer lassen:
 Für angelegte Tages- oder Festgelder: die Unterkontonummer mit der depositId des Kontos füllen. Diese findet ihr z.B. in der URL wenn ihr das Konto aufruft. Dürfte aus 5 Gruppen a 3 Zeichen getrennt durch _ bestehen. Bei der Eingabe in Hibiscus die Unterstriche weg lassen und alle 15 Zeichen hintereinander weg eingeben. Unter **Zugangsweg** *Raisin* auswählen.
 
 ### Scalable Capital
-Für alle Funktionen müssen drei Konten angelegt werden.
-| Art  | Kontoart  | Kundenkennung  | IBAN  | Zugangsweg  | 
-|---|---|---|---|---|
-| Verrechnungskonto  | Kontokorrent/Girokonto  | E-Mail-Adresse, wie beim Login genutzt  | Gemäß Angabe auf der Webseite  | Scalable Capital  |
-| Tagesgeldkonto  | Sparkonto  |   E-Mail-Adresse wie, beim Login genutzt  | Gemäß Angabe auf der Webseite   | Scalable Capital |
-| Depot  | Wertpapierdepot  | E-Mail-Adresse, wie beim Login genutzt  | Gemäß Angabe auf der Webseite  | Scalable Capital |
+Für alle Funktionen müssen drei Konten angelegt werden.<BR>
+| Art  | Kontoart  | Kundenkennung  | IBAN  | Zugangsweg  | <BR>
+|---|---|---|---|---|<BR>
+| Verrechnungskonto  | Kontokorrent/Girokonto  | E-Mail-Adresse, wie beim Login genutzt  | Gemäß Angabe auf der Webseite  | Scalable Capital  |<BR>
+| Tagesgeldkonto  | Sparkonto  |   E-Mail-Adresse wie, beim Login genutzt  | Gemäß Angabe auf der Webseite   | Scalable Capital |<BR>
+| Depot  | Wertpapierdepot  | E-Mail-Adresse, wie beim Login genutzt  | Gemäß Angabe auf der Webseite  | Scalable Capital |<BR>
 
 Für das Depot muss das Plugin "hibiscus.depotviewer" installiert sein.
 

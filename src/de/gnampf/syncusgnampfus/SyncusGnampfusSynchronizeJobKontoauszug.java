@@ -25,8 +25,6 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.util.NameValuePair;
 import org.json.JSONObject;
 
-import com.microsoft.playwright.PlaywrightException;
-import com.microsoft.playwright.Response;
 
 import de.willuhn.datasource.rmi.DBIterator;
 import de.willuhn.jameica.hbci.SynchronizeOptions;
@@ -49,7 +47,6 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 	protected ProgressMonitor monitor;
 	protected ProxyConfig proxyConfig;
 	protected DBIterator<Umsatz> umsaetze;
-	protected WebClient webClient;
 	protected List<KeyValue<String, String>> permanentHeaders = new ArrayList<KeyValue<String, String>>();
 
 	protected boolean skipLogout = false;
@@ -172,8 +169,6 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 				log(Level.ERROR, "Login fehlgeschlagen! Passwort-Eingabe vom Benutzer abgebrochen");
 				throw new java.lang.Exception("Login fehlgeschlagen! Passwort-Eingabe vom Benutzer abgebrochen");
 			}
-	
-			webClient = getWebClient(null);
 			
 			boolean forceAll = false;
 			if (konto.getSaldoDatum() == null)
@@ -366,7 +361,9 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			String contentType, String data, boolean javascriptEnabled) throws URISyntaxException, FailingHttpStatusCodeException, IOException, ApplicationException 
 	{
 		ArrayList<KeyValue<String, String>> mergedHeader = new ArrayList<>();
-		
+		mergedHeader.add(new KeyValue<>("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"));
+		mergedHeader.add(new KeyValue<>("Accept", "*/*"));
+		mergedHeader.add(new KeyValue<>("Accept-Language", "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"));
 		for (var header : permanentHeaders)
 		{
 			mergedHeader.add(header);
@@ -379,130 +376,175 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 			}
 		}
 
-		return doRequest(webClient, url, method, mergedHeader, contentType, data, javascriptEnabled);
-	}		
-
-	protected static WebResult doRequest(WebClient webClient, String url, HttpMethod method, List<KeyValue<String, String>> headers,
-			String contentType, String data) throws URISyntaxException, FailingHttpStatusCodeException, IOException, ApplicationException
-	{
-		return doRequest(webClient, url, method, headers, contentType, data, false);
-	}
-
-	protected static WebResult doRequest(WebClient webClient, String url, HttpMethod method, List<KeyValue<String, String>> headers,
-			String contentType, String data, boolean javascriptEnabled) throws URISyntaxException, FailingHttpStatusCodeException, IOException, ApplicationException 
-	{
-		WebRequest request = new WebRequest(new java.net.URI(url).toURL(), method);
-		request.setAdditionalHeaders(new Hashtable<String, String>());
-		request.setAdditionalHeader("Accept", "application/json");
-		request.setAdditionalHeader("Accept-Language", "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7");
-		if (contentType != null)
-		{
-			request.setAdditionalHeader("Content-Type", contentType);
-		}
-		if (headers != null)
-		{
-			for (var header : headers)
-			{
-				if (header.getValue() != null)
-				{
-					request.setAdditionalHeader(header.getKey(), header.getValue());
-				}
-			}
-		}
-		if (data != null)
-		{
-			request.setRequestBody(data);
-		}
-
-		webClient.getOptions().setJavaScriptEnabled(javascriptEnabled);
-		Page page = webClient.getPage(request);
-		if (page == null) 
-		{
-			return null;
-		}
-		else 
-		{
-			var response = page.getWebResponse();
-			var text = response.getContentAsString(utf8);
-			return new WebResult(response.getStatusCode(), text, response.getResponseHeaders(), page);
-		}
-	}
-
-	protected WebResult doRequest(com.microsoft.playwright.Page page, String url, HttpMethod method, List<KeyValue<String,String>> headers, String contentType, String data, boolean retry) throws URISyntaxException, org.htmlunit.FailingHttpStatusCodeException, IOException, ApplicationException
-	{
-		var responseObj = new Object() { public List<NameValuePair> header = null; };
-		var responseHandler = new Consumer<Response>() 
-		{
-			@Override
-			public void accept(Response r) 
-			{
-				if (r.url().equals(url) && method.toString().equals(r.request().method()))
-				{
-					ArrayList<NameValuePair> headers = new ArrayList<>();
-					r.headersArray().forEach(h -> 
-					{
-						headers.add(new NameValuePair(h.name, h.value));
-					});
-					responseObj.header = headers;
-				}
-			}
-		};
-		
-
-		var js = "fetch(\""+url+"\", { method: \"" + method + "\", ";
-		if (data != null)
-		{
-			js += "body: \"" + data.replace("\"", "\\\"") + "\", ";
-		}
-		js += "headers: {";
-		if (headers != null)
-		{
-			for (var header : headers)			
-			{		
-				js += "\"" + header.getKey() + "\": \"" +  header.getValue().replace("\"", "\\\"") + "\", ";
-			}
-		}
-		for (var header : permanentHeaders)			
-		{		
-			js += "\"" + header.getKey() + "\": \"" +  header.getValue().replace("\"", "\\\"") + "\", ";
-		}
-		js += "\"Accept\": \"*/*\"";
-		if (contentType != null)
-		{
-			js += ", \"Content-Type\": \"" + contentType.replace("\"", "\\\"") + "\"";
-		}
-		js += "}, \"mode\": \"cors\", \"credentials\": \"include\"}).then((ret) => { window.s = ret.status; return ret.text(); }, (ret) => { window.s = 500; return \"Unhandled Exception: \" + ret; }).then((text) => { return \"{\\\"status\\\":\" + window.s + \", \\\"body\\\": \" + JSON.stringify(text) + \"}\"; })";
-		
-		
-		page.onResponse(responseHandler);
-		Object result;
-		try 
-		{
-			result = page.evaluate(js);
-		}
-		catch (PlaywrightException e)
-		{
-			page.waitForLoadState();
-			result = page.evaluate(js);
-		}
-		var resultJSON = new JSONObject(result.toString());
-		page.offResponse(responseHandler);
-
+		var responseHeaders = new ArrayList<KeyValue<String, String>>();
 		try
 		{
-			return new WebResult(resultJSON.getInt("status"), resultJSON.getString("body"), responseObj.header, null);
+			var r = mobileHttpRequest(url, method.toString(), mergedHeader, contentType, data, null, responseHeaders);
+			return new WebResult(Integer.parseInt(r[0]), r[1], responseHeaders);
 		}
-		catch (Exception e)
+		catch (ApplicationException e) { throw e; }
+		catch (Exception e) { throw new ApplicationException(e.getMessage(), e); }
+	}
+
+	protected final java.util.Map<String, String> mobileCookieJar = new java.util.LinkedHashMap<>();
+
+	protected String[] mobileHttpRequest(String url, String method,
+			List<KeyValue<String, String>> headers, String contentType, String body,
+			List<String[]> outSetCookies, List<KeyValue<String, String>> outResponseHeaders) throws Exception
+	{
+		okhttp3.Request.Builder reqBuilder = new okhttp3.Request.Builder().url(url);
+		if (headers != null)
 		{
-			if (retry)
+			for (var h : headers)
 			{
-				return doRequest(page, url, method, headers, contentType, data, retry);
-			}
-			else
-			{
-				log(Level.ERROR, "Fehler bei URL " + url + ", Antwort: " + result.toString());			
-				throw e;
+				if (h.getValue() != null)
+				{
+					reqBuilder.header(h.getKey(), h.getValue());
+				}
 			}
 		}
+		if (!mobileCookieJar.isEmpty())
+		{
+			var cookieHeader = new StringBuilder();
+			for (var entry : mobileCookieJar.entrySet())
+			{
+				if (cookieHeader.length() > 0) cookieHeader.append("; ");
+				cookieHeader.append(entry.getKey()).append("=").append(entry.getValue());
+			}
+			reqBuilder.header("Cookie", cookieHeader.toString());
+		}
+
+		okhttp3.RequestBody requestBody = null;
+		if (body != null)
+		{
+			okhttp3.MediaType mt = okhttp3.MediaType.parse(contentType != null ? contentType : "application/json; charset=UTF-8");
+			requestBody = okhttp3.RequestBody.create(body.getBytes(utf8), mt);
+		}
+		if (requestBody == null && !"GET".equals(method) && !"HEAD".equals(method))
+		{
+			requestBody = okhttp3.RequestBody.create(new byte[0], (okhttp3.MediaType) null);
+		}
+		reqBuilder.method(method, requestBody);
+
+		try (okhttp3.Response response = mobileClient().newCall(reqBuilder.build()).execute())
+		{
+			int statusCode = response.code();
+			if (outResponseHeaders != null)
+			{
+				var respHdrs = response.headers();
+				for (int i = 0; i < respHdrs.size(); i++)
+				{
+					outResponseHeaders.add(new KeyValue<String, String>(respHdrs.name(i), respHdrs.value(i)));
+				}
+			}
+			for (String setCookieVal : response.headers("Set-Cookie"))
+			{
+				String nameValue = setCookieVal.split(";")[0].trim();
+				int eq = nameValue.indexOf('=');
+				if (eq > 0)
+				{
+					String cName  = nameValue.substring(0, eq).trim();
+					String cValue = nameValue.substring(eq + 1).trim();
+					mobileCookieJar.put(cName, cValue);
+					if (outSetCookies != null)
+					{
+						outSetCookies.add(new String[]{ cName, cValue });
+					}
+				}
+			}
+			String responseBody = response.body() != null ? response.body().string() : "";
+			return new String[]{ String.valueOf(statusCode), responseBody };
+		}
+	}
+
+	private okhttp3.OkHttpClient mobileOkHttpClient;
+
+	protected okhttp3.OkHttpClient mobileClient() throws Exception
+	{
+		if (mobileOkHttpClient == null)
+		{
+			java.security.Provider conscrypt = org.conscrypt.Conscrypt.newProvider();
+			javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS", conscrypt);
+			javax.net.ssl.TrustManagerFactory tmf = javax.net.ssl.TrustManagerFactory.getInstance(
+					javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+			tmf.init((java.security.KeyStore) null);
+			final javax.net.ssl.X509ExtendedTrustManager delegateTm = (javax.net.ssl.X509ExtendedTrustManager) tmf.getTrustManagers()[0];
+			// Conscrypt reicht bei TLS 1.3 den authType "GENERIC" an den TrustManager; der
+			// JDK-Default kennt den nicht ("Unknown authType: GENERIC"/"EC") und wirft. In dem Fall
+			// mit authType "UNKNOWN" erneut prüfen — der JDK-Checker überspringt dann die
+			// KeyUsage-Prüfung, validiert aber weiterhin die Zertifikatskette (funktioniert für
+			// RSA- und EC-Zertifikate). Conscrypt nutzt die erweiterte 3-arg-API (mit Socket/
+			// SSLEngine), daher müssen alle Varianten überschrieben werden.
+			javax.net.ssl.X509ExtendedTrustManager trustManager = new javax.net.ssl.X509ExtendedTrustManager()
+			{
+				private boolean authTypeIssue(Throwable e)
+				{
+					return String.valueOf(e.getMessage()).toLowerCase().contains("authtype");
+				}
+				private void rethrow(Throwable e) throws java.security.cert.CertificateException
+				{
+					if (e instanceof java.security.cert.CertificateException) throw (java.security.cert.CertificateException) e;
+					if (e instanceof RuntimeException) throw (RuntimeException) e;
+					if (e instanceof Error) throw (Error) e;
+					throw new java.security.cert.CertificateException(e);
+				}
+				@Override
+				public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) throws java.security.cert.CertificateException
+				{
+					try { delegateTm.checkServerTrusted(c, a); }
+					catch (Throwable e) { if (authTypeIssue(e)) delegateTm.checkServerTrusted(c, "UNKNOWN"); else rethrow(e); }
+				}
+				@Override
+				public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a, java.net.Socket s) throws java.security.cert.CertificateException
+				{
+					try { delegateTm.checkServerTrusted(c, a, s); }
+					catch (Throwable e) { if (authTypeIssue(e)) delegateTm.checkServerTrusted(c, "UNKNOWN", s); else rethrow(e); }
+				}
+				@Override
+				public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a, javax.net.ssl.SSLEngine s) throws java.security.cert.CertificateException
+				{
+					try { delegateTm.checkServerTrusted(c, a, s); }
+					catch (Throwable e) { if (authTypeIssue(e)) delegateTm.checkServerTrusted(c, "UNKNOWN", s); else rethrow(e); }
+				}
+				@Override
+				public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a) throws java.security.cert.CertificateException
+				{ delegateTm.checkClientTrusted(c, a); }
+				@Override
+				public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a, java.net.Socket s) throws java.security.cert.CertificateException
+				{ delegateTm.checkClientTrusted(c, a, s); }
+				@Override
+				public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a, javax.net.ssl.SSLEngine s) throws java.security.cert.CertificateException
+				{ delegateTm.checkClientTrusted(c, a, s); }
+				@Override
+				public java.security.cert.X509Certificate[] getAcceptedIssuers()
+				{ return delegateTm.getAcceptedIssuers(); }
+			};
+			sslContext.init(null, new javax.net.ssl.TrustManager[]{ trustManager }, null);
+
+			var okBuilder = new okhttp3.OkHttpClient.Builder()
+					.sslSocketFactory(sslContext.getSocketFactory(), trustManager)
+					.followRedirects(true)
+					.followSslRedirects(true)
+					.connectTimeout(java.time.Duration.ofSeconds(30))
+					.readTimeout(java.time.Duration.ofSeconds(30))
+/*					.addNetworkInterceptor(chain -> {
+						okhttp3.Request req = chain.request();
+						log(Level.INFO, "TX " + req.method() + " " + req.url()
+								+ " | Header: " + req.headers().toString().replace("\n", " | "));
+						okhttp3.Response resp = chain.proceed(req);
+						log(Level.INFO, "RX proto=" + resp.protocol() + " code=" + resp.code());
+						return resp;
+					})*/;
+			// Proxy aus den Jameica-Einstellungen (wie zuvor der Browser) uebernehmen.
+			if (proxyConfig != null && proxyConfig.getProxyHost() != null && !proxyConfig.getProxyHost().isBlank())
+			{
+				okBuilder.proxy(new java.net.Proxy(java.net.Proxy.Type.HTTP,
+						new java.net.InetSocketAddress(proxyConfig.getProxyHost(), proxyConfig.getProxyPort())));
+				log(Level.INFO, "okhttp nutzt Proxy " + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort());
+			}
+			mobileOkHttpClient = okBuilder.build();
+			log(Level.INFO, "okhttp/Conscrypt-Client für mobilen Login initialisiert");
+		}
+		return mobileOkHttpClient;
 	}
 }
