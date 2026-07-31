@@ -15,6 +15,7 @@ public class RaisinSynchronizeBackend extends SyncusGnampfusSynchronizeBackend {
 	public final static String META_NOTHEADLESS = "Browser anzeigen";
 	public final static String META_DEVICECOOKIES = "DeviceCookies";
 	public final static String META_TRUST = "Als vertrauensw\u00FCrdiges Ger\u00E4t hinterlegen";
+	public final static String META_FRCSITEKEY = "FrcSitekey";
 
 	@Override
     public String getName() {
@@ -44,6 +45,7 @@ public class RaisinSynchronizeBackend extends SyncusGnampfusSynchronizeBackend {
 
 			List<String> result = new ArrayList<String>();
 			result.add(META_NOTHEADLESS + "(true/false)");
+			result.add(META_TRUST + "(true/false)");
 			return result;
 		} 
 		catch (RemoteException e) 

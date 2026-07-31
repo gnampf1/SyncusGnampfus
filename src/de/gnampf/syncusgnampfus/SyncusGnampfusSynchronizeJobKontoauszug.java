@@ -543,7 +543,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 				log(Level.INFO, "okhttp nutzt Proxy " + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort());
 			}
 			mobileOkHttpClient = okBuilder.build();
-			log(Level.INFO, "okhttp/Conscrypt-Client für mobilen Login initialisiert");
+			log(Level.INFO, "okhttp/Conscrypt-Client f\u00fcr mobilen Login initialisiert");
 		}
 		return mobileOkHttpClient;
 	}

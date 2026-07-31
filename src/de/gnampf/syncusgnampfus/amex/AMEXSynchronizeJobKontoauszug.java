@@ -636,7 +636,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 									}
 									else 
 									{
-										log(Level.WARN, "Konnto AccountToken für Hauptkarte nicht ermitteln");
+										log(Level.WARN, "Konnto AccountToken f\u00fcr Hauptkarte nicht ermitteln");
 									}
 								}
 								else

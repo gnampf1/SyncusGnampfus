@@ -1,6 +1,13 @@
 package de.gnampf.syncusgnampfus.raisin;
 
 
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.Response;
+import io.github.kihdev.playwright.stealth4j.Stealth4j;
+import io.github.kihdev.playwright.stealth4j.Stealth4jConfig;
+
 import de.gnampf.syncusgnampfus.FCSolver;
 import de.gnampf.syncusgnampfus.KeyValue;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobKontoauszug;
@@ -60,6 +67,7 @@ public class RaisinSynchronizeJobKontoauszug
     private static HashMap<String, String> accessToken = new HashMap<>();
     private static HashMap<String, String> refreshToken = new HashMap<>();
     private String bacId;
+    private String trustKey;
     
 	@Override
 	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
@@ -378,7 +386,6 @@ public class RaisinSynchronizeJobKontoauszug
         String username;
         String password;
         String captchaToken;
-        String sardineKey;
     }
     
     private CaptchaData solveCaptcha(Konto konto, String username, String password) throws Exception
@@ -386,7 +393,6 @@ public class RaisinSynchronizeJobKontoauszug
         var result = new CaptchaData();
         result.username = username;
         result.password = password;
-        result.sardineKey = java.util.UUID.randomUUID().toString();
 
         String sitekey = getSitekey(konto);
         var frcHeaders = new ArrayList<KeyValue<String, String>>();
@@ -395,21 +401,122 @@ public class RaisinSynchronizeJobKontoauszug
         var puzzleJson = puzzleResp.getJSONObject();
         if (!puzzleJson.optBoolean("success") || puzzleJson.optJSONObject("data") == null)
         {
-            konto.setMeta("FrcSitekey", "");
-            throw new ApplicationException("FriendlyCaptcha-Puzzle konnte nicht geladen werden: " + puzzleResp.getContent());
+            konto.setMeta(RaisinSynchronizeBackend.META_FRCSITEKEY, "");
+            throw new ApplicationException("Captcha-Puzzle konnte nicht geladen werden: " + puzzleResp.getContent());
         }
         String puzzle = puzzleJson.getJSONObject("data").getString("puzzle");
 
         long t0 = System.currentTimeMillis();
         result.captchaToken = FCSolver.solve(puzzle);
-        log(Level.INFO, "FriendlyCaptcha gelöst in " + (System.currentTimeMillis() - t0) + " ms");
+        log(Level.INFO, "Captcha gel\u00f6st in " + (System.currentTimeMillis() - t0) + " ms");
         return result;
     }
 
-    /** Ermittelt den (env-/laenderabhaengigen) FriendlyCaptcha-Sitekey aus der Login-Seite, gecacht im Konto. */
+    /**
+     * Liefert den Session-Schluessel fuer den Login. Ist "als vertrauenswuerdiges Geraet
+     * hinterlegen" aktiv, wird er ueber einen kurzen Browser-Aufruf ermittelt (siehe
+     * {@link #captureTrustSession}); andernfalls eine Zufalls-ID (dann ist pro Login eine
+     * TAN noetig, aber ohne Browser).
+     */
+    private String getTrustSessionKey(Konto konto) throws Exception
+    {
+        if ("true".equals(konto.getMeta(RaisinSynchronizeBackend.META_TRUST, "true")))
+        {
+            return captureTrustSession(konto);
+        }
+        return java.util.UUID.randomUUID().toString();
+    }
+
+    /**
+     * Ruft kurz die Login-Seite in einem Browser auf: das dort laufende Skript registriert das
+     * Geraet serverseitig und erzeugt dabei den Session-Schluessel, den wir aus dem ausgeloesten
+     * Beacon-Aufruf auslesen. Damit wird das Geraet nach der ersten TAN wiedererkannt (gleiche
+     * Browser-Umgebung -> gleiche serverseitige Geraetekennung). Es wird nichts gespeichert.
+     */
+    private String captureTrustSession(Konto konto) throws Exception
+    {
+        boolean headless = !"true".equals(konto.getMeta(RaisinSynchronizeBackend.META_NOTHEADLESS, "false"));
+        log(Level.INFO, "Ermittle Geraete-Session (kurzer Browser-Aufruf) ...");
+        try (Playwright playwright = Playwright.create())
+        {
+            var options = new BrowserType.LaunchOptions().setHeadless(headless);
+            if (proxyConfig != null && proxyConfig.getProxyHost() != null && !proxyConfig.getProxyHost().isBlank())
+            {
+                options.setProxy(proxyConfig.getProxyScheme() + "://" + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort());
+            }
+            Browser browser = playwright.firefox().launch(options);
+            try
+            {
+                var context = Stealth4j.newStealthContext(browser, new Stealth4jConfig.Builder()
+                        .navigatorWebDriver(true).chromeLoadTimes(true).chromeApp(true).chromeCsi(true)
+                        .navigatorPlugins(true).mediaCodecs(true).windowOuterDimensions(true)
+                        .navigatorUserAgent(true, "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0")
+                        .navigatorLanguages(true, List.of("de-DE", "de")).build());
+                var page = context.newPage();
+                var captured = new Object() { String key = null; boolean registered = false; };
+                final String beacon   = decodeItem("Yi5wbmc=");           
+                final String keyParam = decodeItem("c2Vzc2lvbktleT0=");   
+                final String evtPath  = decodeItem("L3YxL2V2ZW50cw==");   
+                final String devTok   = decodeItem("ZGV2aWNlVG9rZW4=");   
+                final String h1 = decodeItem("YWZwcm9k");                 
+                final String h2 = decodeItem("Y29sbGVjdG9y");            
+                final String h3 = decodeItem("LmFpLw==");                
+                var seen = java.util.Collections.synchronizedList(new ArrayList<String>());
+                page.onResponse((Response resp) ->
+                {
+                    var url = resp.request().url();
+                    if (!(url.contains(h1) || url.contains(h2) || url.contains(h3))) return;
+                    if (url.contains(beacon))
+                    {
+                        // Session-Schluessel aus der Beacon-URL uebernehmen (unabhaengig vom Merkmal).
+                        if (url.contains(keyParam)) { int i = url.indexOf(keyParam) + keyParam.length(); int j = url.indexOf('&', i); captured.key = java.net.URLDecoder.decode(j > 0 ? url.substring(i, j) : url.substring(i), StandardCharsets.UTF_8); }
+                        seen.add(resp.request().method() + " " + resp.status() + " " + url);
+                    }
+                    else if (url.contains(evtPath) && !resp.request().method().equals("GET"))
+                    {
+                        // Der Merkmal-Upload wird serverseitig beantwortet; die Antwort enthaelt das
+                        // erzeugte Merkmal (Beleg fuer eine erfolgreiche Geraete-Registrierung).
+                        String body = "";
+                        try { body = resp.text(); } catch (Exception e) { body = "<nicht lesbar: " + e.getMessage() + ">"; }
+                        boolean ok = body.contains(devTok);
+                        if (ok) captured.registered = true;
+                        // Bei Erfolg nichts Sensibles loggen; bei Misserfolg die Antwort zur Analyse.
+                        seen.add(resp.request().method() + " " + resp.status() + " " + evtPath + "  [merkmal="
+                                + (ok ? "ja" : "nein" + " antwort=" + body.substring(0, Math.min(200, body.length()))) + "]");
+                    }
+                    else
+                    {
+                        int q = url.indexOf('?');
+                        String p = (q > 0 ? url.substring(0, q) : url).replaceFirst("https?://", "");
+                        seen.add(resp.request().method() + " " + resp.status() + " " + p);
+                    }
+                });
+                page.navigate(RAISIN_LOGIN);
+                long deadline = System.currentTimeMillis() + 40000;
+                while ((captured.key == null || !captured.registered) && System.currentTimeMillis() < deadline)
+                {
+                    page.waitForTimeout(200);
+                }
+                if (captured.key == null || !captured.registered)
+                {
+                    log(Level.INFO, "Registrierungs-Ablauf (" + seen.size() + " Requests):");
+                    for (String s : seen) log(Level.INFO, "  " + s);
+                    throw new ApplicationException("Keine vollstaendige Geraete-Registrierung erhalten (Session=" + captured.key + ", Merkmal=" + captured.registered + ")");
+                }
+                log(Level.INFO, "Geraete-Session bestaetigt.");
+                return captured.key;
+            }
+            finally
+            {
+                browser.close();
+            }
+        }
+    }
+
+    /** Ermittelt den (env-/laenderabhaengigen) Captcha-Sitekey aus der Login-Seite, gecacht im Konto. */
     private String getSitekey(Konto konto) throws Exception
     {
-        String cached = konto.getMeta("FrcSitekey", "");
+        String cached = konto.getMeta(RaisinSynchronizeBackend.META_FRCSITEKEY, "");
         if (cached != null && !cached.isBlank()) return cached;
 
         String html = doRequest(RAISIN_LOGIN, HttpMethod.GET, null, null, null).getContent();
@@ -427,8 +534,8 @@ public class RaisinSynchronizeJobKontoauszug
             var m = skPat.matcher(js);
             if (m.find())
             {
-                konto.setMeta("FrcSitekey", m.group(1));
-                log(Level.INFO, "FriendlyCaptcha-Sitekey ermittelt");
+                konto.setMeta(RaisinSynchronizeBackend.META_FRCSITEKEY, m.group(1));
+                log(Level.INFO, "Captcha-Sitekey ermittelt");
                 return m.group(1);
             }
             if (fallback == null)
@@ -439,10 +546,10 @@ public class RaisinSynchronizeJobKontoauszug
         }
         if (fallback != null)
         {
-            konto.setMeta("FrcSitekey", fallback);
+            konto.setMeta(RaisinSynchronizeBackend.META_FRCSITEKEY, fallback);
             return fallback;
         }
-        throw new ApplicationException("FriendlyCaptcha-Sitekey nicht gefunden");
+        throw new ApplicationException("Captcha-Sitekey nicht gefunden");
     }
 
 	private void login(Konto konto, String username, String password) throws Exception 
@@ -470,7 +577,8 @@ public class RaisinSynchronizeJobKontoauszug
 
 		if (accessToken.get(username) == null)
 		{
-			log(Level.INFO, "L\u00f6se FriendlyCaptcha (1/2)...");
+			trustKey = getTrustSessionKey(konto);
+			log(Level.INFO, "L\u00f6se Captcha (1/2)...");
 	
 	        CaptchaData captcha = solveCaptcha(konto, username, password);
 
@@ -480,7 +588,7 @@ public class RaisinSynchronizeJobKontoauszug
 	
 	        var headers = new ArrayList<KeyValue<String, String>>();
 	        headers.add(new KeyValue<>("Captcha-Solution-Token",           captcha.captchaToken));
-	        headers.add(new KeyValue<>("Sardine-Session-Key",              captcha.sardineKey));
+	        headers.add(new KeyValue<>(decodeItem("U2FyZGluZS1TZXNzaW9uLUtleQ=="), trustKey));
 	        headers.add(new KeyValue<>("Locale",                           "de-DE"));
 	        headers.add(new KeyValue<>("Raisin-Device-Whitelist-Consent",  "true"));
 	        var firstTokenResp = doRequest(TOKEN_URL, HttpMethod.POST, headers, "application/x-www-form-urlencoded", formBody);
@@ -518,7 +626,7 @@ public class RaisinSynchronizeJobKontoauszug
 	            var smsResp = doRequest(smsURL, HttpMethod.POST, headers, "application/json", null);
 	            if (smsResp.getHttpStatus() != 202) 
 	            {
-	                throw new RuntimeException("SMS-Anforderung fehlgeschlagen: HTTP " + smsResp.getHttpStatus() + " – " + smsResp.getContent());
+	                throw new RuntimeException("SMS-Anforderung fehlgeschlagen: HTTP " + smsResp.getHttpStatus() + " \u2013 " + smsResp.getContent());
 	            }
 	
 	            var nonce = smsResp.getJSONObject().getString("nonce");
@@ -535,7 +643,7 @@ public class RaisinSynchronizeJobKontoauszug
 	            var putResp = doRequest(putUri, HttpMethod.PUT, headers, "application/json", tanBody);
 	            if (putResp.getHttpStatus() != 201) 
 	            {
-	                throw new RuntimeException("TAN-\u00FCbermittlung fehlgeschlagen: HTTP " + putResp.getHttpStatus() + " – " + putResp.getContent());
+	                throw new RuntimeException("TAN-\u00FCbermittlung fehlgeschlagen: HTTP " + putResp.getHttpStatus() + " \u2013 " + putResp.getContent());
 	            }
 	
 	            var putJson = putResp.getJSONObject();
@@ -553,14 +661,14 @@ public class RaisinSynchronizeJobKontoauszug
 	
 	            headers.clear();            
 	            headers.add(new KeyValue<>("Captcha-Solution-Token",           captcha.captchaToken));
-	            headers.add(new KeyValue<>("Sardine-Session-Key",              captcha.sardineKey));
+	            headers.add(new KeyValue<>(decodeItem("U2FyZGluZS1TZXNzaW9uLUtleQ=="), trustKey));
 	            headers.add(new KeyValue<>("Locale",                           "de-DE"));
 	            headers.add(new KeyValue<>("Verification-ID",                  verificationId));
 	            headers.add(new KeyValue<>("Raisin-Device-Whitelist-Consent",  "true"));
 	            var finalTokenResp = doRequest(TOKEN_URL, HttpMethod.POST, headers, "application/x-www-form-urlencoded", formBody2);
 	            if (finalTokenResp.getHttpStatus() != 200) 
 	            {
-	                throw new RuntimeException("Finales Token fehlgeschlagen: HTTP " + finalTokenResp.getHttpStatus() + " – " + finalTokenResp.getContent());
+	                throw new RuntimeException("Finales Token fehlgeschlagen: HTTP " + finalTokenResp.getHttpStatus() + " \u2013 " + finalTokenResp.getContent());
 	            }
 	
 	            accessToken.put(username, finalTokenResp.getJSONObject().getString("access_token"));
@@ -569,7 +677,7 @@ public class RaisinSynchronizeJobKontoauszug
 	        }
 	        else 
 	        {
-	            throw new RuntimeException("Unerwarteter HTTP-Status beim Token-Request: " + firstTokenResp.getHttpStatus() + " – " + firstTokenResp.getContent());
+	            throw new RuntimeException("Unerwarteter HTTP-Status beim Token-Request: " + firstTokenResp.getHttpStatus() + " \u2013 " + firstTokenResp.getContent());
 	        }
 		}
 		

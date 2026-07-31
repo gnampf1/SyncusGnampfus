@@ -37,6 +37,7 @@ import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobKontoauszug;
 import de.gnampf.syncusgnampfus.WebResult;
 import de.willuhn.datasource.rmi.DBIterator;
 import de.willuhn.jameica.hbci.Settings;
+import de.willuhn.jameica.hbci.messaging.ObjectChangedMessage;
 import de.willuhn.jameica.hbci.messaging.SaldoMessage;
 import de.willuhn.jameica.hbci.rmi.Konto;
 import de.willuhn.jameica.hbci.rmi.Umsatz;
@@ -373,7 +374,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			var dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
 			dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
 			var neueUmsaetze = new ArrayList<Umsatz>();
-			var duplikatGefunden = new Object() { boolean value = false; };
+			var duplikate = new ArrayList<Umsatz>();
 			String nextPage = null;
 			
 			boolean isExtSearch = false;
@@ -605,6 +606,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							String zweck;
 							if (!isKreditkarte) 
 							{
+								newUmsatz.setBetrag(transaction.optJSONObject("amount").optDouble("amount"));
 								newUmsatz.setSaldo(transaction.optJSONObject("balance").optJSONObject("accountingBalance").optDouble("amount"));
 								var vz = transaction.optString("humanExtendedConceptName");
 
@@ -616,6 +618,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 										!"KPSA".equals(detailSourceId) &&
 										!"PGGP".equals(detailSourceId) &&
 										!"SBTF".equals(detailSourceId) && 
+										!"PAAD".equals(detailSourceId) &&
 										!"PGGI".equals(detailSourceId))
 								{
 									var detailResponse = doRequest(decodeItem("aHR0cHM6Ly9kZS1uZXQuYmJ2YS5jb20vdHJhbnNmZXJzL3YwL3RyYW5zZmVycy8=") + detailSourceKey + "-RE-" + contractId + "/", HttpMethod.GET, headers, null, null);
@@ -659,7 +662,20 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							}
 							else
 							{
+								newUmsatz.setBetrag(transaction.optJSONObject("holderAmount").optDouble("amount"));
+								var foreignAmount = transaction.optJSONObject("amount").optDouble("amount");
+								var foreignCurrency = transaction.optJSONObject("amount").optJSONObject("currency").optString("code");
 								zweck = transaction.optJSONObject("shop").optString("name");
+								if (!"EUR".equals(foreignCurrency)) {
+									zweck += " (" + String.format( "%.2f", foreignAmount) + " " + foreignCurrency +")";
+								}
+								zweck = zweck.trim();
+								
+								var status = transaction.optJSONObject("status").optInt("id");
+								if (status < 7) 
+								{
+									newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
+								}
 							}
 
 							newUmsatz.setTransactionId(transaction.optString("id"));
@@ -680,9 +696,22 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 							}
 							newUmsatz.setWeitereVerwendungszwecke(zwecke.toArray(new String[0]));
 
-							if (getDuplicateById(newUmsatz) != null)
+							var duplikat = getDuplicateById(newUmsatz);
+							if (duplikat != null) 
 							{
-								duplikatGefunden.value = true;
+								if (!newUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED) && duplikat.hasFlag(Umsatz.FLAG_NOTBOOKED))
+								{
+									duplikat.setFlags(Umsatz.FLAG_NONE);
+									duplikat.store();
+									Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(duplikat));
+								}
+								if (duplikat.getTransactionId() == null)
+								{
+									duplikat.setTransactionId(newUmsatz.getTransactionId());
+									duplikat.store();
+									Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(duplikat));
+								}
+								duplikate.add(duplikat);
 							}
 							else
 							{
@@ -696,17 +725,21 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					});
 				}
 
-				if (!isExtSearch && !isKreditkarte && (forceAll || !duplikatGefunden.value) && ((nextPage == null) || nextPage.isEmpty())) {
+				if (!isExtSearch && !isKreditkarte && (forceAll || duplikate.size() == 0) && ((nextPage == null) || nextPage.isEmpty())) {
 					log(Level.DEBUG, "no nextPage info found -> switch to ext search");
 					isExtSearch = true;
 					isExtSearchPending = true;
 				}
-			} while ((forceAll || !duplikatGefunden.value) && (isExtSearchPending || ((nextPage != null) && !nextPage.isEmpty())));
+			} while ((forceAll || duplikate.size() == 0) && (isExtSearchPending || ((nextPage != null) && !nextPage.isEmpty())));
 
 			monitor.setPercentComplete(75); 
 			log(Level.INFO, "Kontoauszug erfolgreich. Importiere Daten ...");
 
 			reverseImport(neueUmsaetze);
+						
+			log(Level.INFO, "L\u00f6sche nicht mehr existierende Reservierungen");
+			deleteMissingUnbooked(duplikate);
+			monitor.setPercentComplete(35);
 		} 
 		finally
 		{

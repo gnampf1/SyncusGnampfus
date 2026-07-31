@@ -110,27 +110,27 @@ final class ScalableCapitalOkLogin {
       String skey = firstGroup(Pattern.compile("data-captcha-sitekey=\"([^\"]+)\""), pr[1]);
       if (prov != null) {
         log.accept("[SC-Login]   aktiver Captcha-Provider: " + prov
-            + ("friendly_captcha".equals(prov) ? " (lösbar)" : " (nicht ohne Browser lösbar)"));
+            + ("friendly_captcha".equals(prov) ? " (l\u00f6sbar)" : " (nicht ohne Browser l\u00f6sbar)"));
       }
       if ("friendly_captcha".equals(prov) && skey != null) {
         String token = solveFrc(client, skey, log);
         String state2 = firstNonNull(
             firstGroup(Pattern.compile("name=\"state\"\\s+value=\"([^\"]+)\""), pr[1]), state);
         pr = doLoginPost(client, state2, username, password, token, loginUrl);
-        log.accept("[SC-Login]   nach Captcha-Lösung -> host=" + pr[0] + ", Marker: " + markers(pr[1]));
+        log.accept("[SC-Login]   nach Captcha-L\u00f6sung -> host=" + pr[0] + ", Marker: " + markers(pr[1]));
       }
       if (!APP_HOST.equals(pr[0])) {
         if (pr[1].contains("wrong-email-credentials")) {
           throw new de.willuhn.util.ApplicationException("Scalable Capital: Benutzername oder Passwort falsch");
         }
         throw new FallbackNeededException("Login nicht abgeschlossen auf host=" + pr[0]
-            + " (Captcha/Challenge nicht auflösbar, siehe Marker im Log)");
+            + " (Captcha/Challenge nicht aufl\u00f6sbar, siehe Marker im Log)");
       }
     }
     log.accept("[SC-Login]   Login erfolgreich durchgelaufen (Redirect auf App-Host).");
 
     // 3) IDs aus __NEXT_DATA__ der Transaktionsseite lesen (statisch, kein JS nötig)
-    log.accept("[SC-Login] 3/4 lade Transaktionsseite für portfolioId/personId");
+    log.accept("[SC-Login] 3/4 lade Transaktionsseite f\u00fcr portfolioId/personId");
     String txPage;
     String txUrl;
     try (Response r = client.newCall(new Request.Builder().url(TRANSACTIONS_URL)
@@ -191,7 +191,7 @@ final class ScalableCapitalOkLogin {
 
   /** Holt ein FriendlyCaptcha-Puzzle für den Sitekey und löst es (Proof-of-Work) in Java. */
   private static String solveFrc(OkHttpClient client, String sitekey, Consumer<String> log) throws Exception {
-    log.accept("[SC-Login]   löse FriendlyCaptcha (sitekey=" + sitekey + ") ...");
+    log.accept("[SC-Login]   l\u00f6se FriendlyCaptcha (sitekey=" + sitekey + ") ...");
     Request req = new Request.Builder()
         .url("https://api.friendlycaptcha.com/api/v1/puzzle?sitekey=" + sitekey)
         .header("User-Agent", UA).header("x-frc-client", "js-0.9.19").build();
@@ -203,7 +203,7 @@ final class ScalableCapitalOkLogin {
     if (puzzle == null) throw new FallbackNeededException("FriendlyCaptcha-Puzzle nicht erhalten");
     long t0 = System.currentTimeMillis();
     String token = FCSolver.solve(puzzle);
-    log.accept("[SC-Login]   FriendlyCaptcha gelöst in " + (System.currentTimeMillis() - t0) + " ms");
+    log.accept("[SC-Login]   FriendlyCaptcha gel\u00f6st in " + (System.currentTimeMillis() - t0) + " ms");
     return token;
   }
 
@@ -230,15 +230,15 @@ final class ScalableCapitalOkLogin {
         .matcher(nextData);
     while (km.find() && interesting.size() < 40) interesting.add(km.group(1));
     log.accept("[SC-Login]   Kandidaten-Felder in __NEXT_DATA__: " + interesting);
-    log.accept("[SC-Login]   enthält 'personId'=" + nextData.contains("personId")
+    log.accept("[SC-Login]   enth\u00e4lt 'personId'=" + nextData.contains("personId")
         + ", 'portfolioId'=" + nextData.contains("portfolioId")
         + ", 'initialQueryResult'=" + nextData.contains("initialQueryResult"));
     for (String needle : new String[]{"person", "portfolio"}) {
       int i = nextData.toLowerCase().indexOf(needle);
       if (i >= 0) {
         int a = Math.max(0, i - 30), z = Math.min(nextData.length(), i + 120);
-        log.accept("[SC-Login]   Kontext um '" + needle + "': …"
-            + nextData.substring(a, z).replaceAll("\\s+", " ") + "…");
+        log.accept("[SC-Login]   Kontext um '" + needle + "': \u2026"
+            + nextData.substring(a, z).replaceAll("\\s+", " ") + "\u2026");
       }
     }
   }
