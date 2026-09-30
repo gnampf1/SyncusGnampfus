@@ -235,6 +235,9 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 			});
 
+			log(Level.DEBUG, "BBVA Kontenabgleich: Unterkonto=" + konto.getUnterkonto() + ", IBAN=" + myIban + ", isKreditkarte=" + isKreditkarte
+					+ ", gefundener Contract=" + (contractDetails.ktoContract != null ? contractDetails.ktoContract.toString() : "keiner"));
+
 			if (contractDetails.ktoContract == null)
 			{
 				log(Level.DEBUG, "Response: " + response.getContent());
@@ -251,6 +254,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			((JSONArray)contractDetails.ktoContract.query("/detail/specificAmounts")).forEach(a ->
 			{
 				var amountObj = (JSONObject)a;
+				log(Level.DEBUG, "BBVA specificAmount: " + amountObj.toString());
 				switch (amountObj.optString("id"))
 				{
 				case "availableBalance":
@@ -278,8 +282,15 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 			if (fetchSaldo)
 			{
-				konto.setSaldoAvailable(contractDetails.availableBalance.optDouble("amount"));
-				
+				if (contractDetails.availableBalance != null)
+				{
+					konto.setSaldoAvailable(contractDetails.availableBalance.optDouble("amount"));
+				}
+				else
+				{
+					log(Level.DEBUG, "BBVA: kein availableBalance im Contract gefunden, SaldoAvailable wird nicht gesetzt");
+				}
+
 				if (contractDetails.currentBalance != null)
 				{
 					if (isKreditkarte) 
