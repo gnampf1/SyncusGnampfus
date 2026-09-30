@@ -362,7 +362,6 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 	{
 		ArrayList<KeyValue<String, String>> mergedHeader = new ArrayList<>();
 		mergedHeader.add(new KeyValue<>("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"));
-		mergedHeader.add(new KeyValue<>("Accept", "*/*"));
 		mergedHeader.add(new KeyValue<>("Accept-Language", "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"));
 		for (var header : permanentHeaders)
 		{
@@ -379,16 +378,16 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		var responseHeaders = new ArrayList<KeyValue<String, String>>();
 		try
 		{
-			var r = mobileHttpRequest(url, method.toString(), mergedHeader, contentType, data, null, responseHeaders);
+			var r = doRequest(url, method.toString(), mergedHeader, contentType, data, null, responseHeaders);
 			return new WebResult(Integer.parseInt(r[0]), r[1], responseHeaders);
 		}
 		catch (ApplicationException e) { throw e; }
 		catch (Exception e) { throw new ApplicationException(e.getMessage(), e); }
 	}
 
-	protected final java.util.Map<String, String> mobileCookieJar = new java.util.LinkedHashMap<>();
+	protected final java.util.Map<String, String> cookieJar = new java.util.LinkedHashMap<>();
 
-	protected String[] mobileHttpRequest(String url, String method,
+	protected String[] doRequest(String url, String method,
 			List<KeyValue<String, String>> headers, String contentType, String body,
 			List<String[]> outSetCookies, List<KeyValue<String, String>> outResponseHeaders) throws Exception
 	{
@@ -403,10 +402,10 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 				}
 			}
 		}
-		if (!mobileCookieJar.isEmpty())
+		if (!cookieJar.isEmpty())
 		{
 			var cookieHeader = new StringBuilder();
-			for (var entry : mobileCookieJar.entrySet())
+			for (var entry : cookieJar.entrySet())
 			{
 				if (cookieHeader.length() > 0) cookieHeader.append("; ");
 				cookieHeader.append(entry.getKey()).append("=").append(entry.getValue());
@@ -426,7 +425,7 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		}
 		reqBuilder.method(method, requestBody);
 
-		try (okhttp3.Response response = mobileClient().newCall(reqBuilder.build()).execute())
+		try (okhttp3.Response response = client().newCall(reqBuilder.build()).execute())
 		{
 			int statusCode = response.code();
 			if (outResponseHeaders != null)
@@ -437,18 +436,27 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 					outResponseHeaders.add(new KeyValue<String, String>(respHdrs.name(i), respHdrs.value(i)));
 				}
 			}
-			for (String setCookieVal : response.headers("Set-Cookie"))
+
+			var responseChain = new ArrayList<okhttp3.Response>();
+			for (var r = response; r != null; r = r.priorResponse())
 			{
-				String nameValue = setCookieVal.split(";")[0].trim();
-				int eq = nameValue.indexOf('=');
-				if (eq > 0)
+				responseChain.add(0, r);
+			}
+			for (var hop : responseChain)
+			{
+				for (String setCookieVal : hop.headers("Set-Cookie"))
 				{
-					String cName  = nameValue.substring(0, eq).trim();
-					String cValue = nameValue.substring(eq + 1).trim();
-					mobileCookieJar.put(cName, cValue);
-					if (outSetCookies != null)
+					String nameValue = setCookieVal.split(";")[0].trim();
+					int eq = nameValue.indexOf('=');
+					if (eq > 0)
 					{
-						outSetCookies.add(new String[]{ cName, cValue });
+						String cName  = nameValue.substring(0, eq).trim();
+						String cValue = nameValue.substring(eq + 1).trim();
+						cookieJar.put(cName, cValue);
+						if (outSetCookies != null)
+						{
+							outSetCookies.add(new String[]{ cName, cValue });
+						}
 					}
 				}
 			}
@@ -457,11 +465,11 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 		}
 	}
 
-	private okhttp3.OkHttpClient mobileOkHttpClient;
+	private okhttp3.OkHttpClient client;
 
-	protected okhttp3.OkHttpClient mobileClient() throws Exception
+	protected okhttp3.OkHttpClient client() throws Exception
 	{
-		if (mobileOkHttpClient == null)
+		if (client == null)
 		{
 			java.security.Provider conscrypt = org.conscrypt.Conscrypt.newProvider();
 			javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS", conscrypt);
@@ -529,10 +537,29 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 					.readTimeout(java.time.Duration.ofSeconds(30))
 /*					.addNetworkInterceptor(chain -> {
 						okhttp3.Request req = chain.request();
-						log(Level.INFO, "TX " + req.method() + " " + req.url()
-								+ " | Header: " + req.headers().toString().replace("\n", " | "));
+						var headerDump = new StringBuilder();
+						for (var name : req.headers().names())
+						{
+							if (headerDump.length() > 0) headerDump.append(" | ");
+							if ("Cookie".equalsIgnoreCase(name))
+							{
+								var cookieNames = new ArrayList<String>();
+								for (var part : req.header(name).split(";"))
+								{
+									cookieNames.add(part.trim().split("=", 2)[0]);
+								}
+								headerDump.append("Cookie: [names only] ").append(cookieNames);
+							}
+							else
+							{
+								headerDump.append(name).append(": ").append(req.header(name));
+							}
+						}
+						log(Level.DEBUG, "TX " + req.method() + " " + req.url() + " | Header: " + headerDump);
 						okhttp3.Response resp = chain.proceed(req);
-						log(Level.INFO, "RX proto=" + resp.protocol() + " code=" + resp.code());
+						var handshake = resp.handshake();
+						log(Level.DEBUG, "RX proto=" + resp.protocol() + " code=" + resp.code()
+								+ " tls=" + (handshake != null ? handshake.tlsVersion() + "/" + handshake.cipherSuite() : "n/a"));
 						return resp;
 					})*/;
 			// Proxy aus den Jameica-Einstellungen (wie zuvor der Browser) uebernehmen.
@@ -542,9 +569,9 @@ public abstract class SyncusGnampfusSynchronizeJobKontoauszug extends Synchroniz
 						new java.net.InetSocketAddress(proxyConfig.getProxyHost(), proxyConfig.getProxyPort())));
 				log(Level.INFO, "okhttp nutzt Proxy " + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort());
 			}
-			mobileOkHttpClient = okBuilder.build();
-			log(Level.INFO, "okhttp/Conscrypt-Client f\u00fcr mobilen Login initialisiert");
+			client = okBuilder.build();
+			log(Level.INFO, "okhttp/Conscrypt-Client f\u00fcr Login initialisiert");
 		}
-		return mobileOkHttpClient;
+		return client;
 	}
 }

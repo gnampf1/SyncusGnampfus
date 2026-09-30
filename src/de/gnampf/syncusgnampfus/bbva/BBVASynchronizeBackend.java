@@ -12,9 +12,6 @@ import de.willuhn.jameica.hbci.rmi.Konto;
 @Lifecycle(Type.CONTEXT)
 public class BBVASynchronizeBackend extends SyncusGnampfusSynchronizeBackend
 {
-	public final static String META_HEADERS = "Headerdaten";
-	public final static String META_URL = "URL";
-
 	@Override
     public String getName()
     {

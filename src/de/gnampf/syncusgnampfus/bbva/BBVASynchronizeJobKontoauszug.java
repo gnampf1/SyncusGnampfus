@@ -16,7 +16,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
-import java.util.UUID;
 
 import javax.annotation.Resource;
 
@@ -27,10 +26,7 @@ import org.json.JSONObject;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Playwright;
-import com.microsoft.playwright.Page.ScreenshotOptions;
-import com.microsoft.playwright.Route.FulfillOptions;
-import com.microsoft.playwright.options.ScreenshotAnimations;
-import com.microsoft.playwright.options.ScreenshotType;
+import com.microsoft.playwright.Page.GetByLabelOptions;
 import de.gnampf.syncusgnampfus.KeyValue;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJob;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJobKontoauszug;
@@ -60,110 +56,103 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	private final static String suffix = decodeItem("ZGU=");
 	private final static String proto = decodeItem("aHR0cHM6Ly8=");
 	private String url = "";
-	
-	protected void fetchPermanentHeaders(Konto konto) throws RemoteException, InterruptedException
+
+	private static class BbvaLoginResult
 	{
-		url = konto.getMeta(BBVASynchronizeBackend.META_URL, "");
-		var headerText = new Object() { public String value = konto.getMeta(BBVASynchronizeBackend.META_HEADERS, ""); };
-		var urlObj = new Object() { public String value = url; };
-		if ("".equals(headerText.value) || "".equals(url))
+		JSONObject json;
+		String tsec;
+		ArrayList<KeyValue<String, String>> headers = new ArrayList<>();
+	}
+
+	private BbvaLoginResult browserLogin(Konto konto, String user, String passwort) throws Exception
+	{
+		var result = new BbvaLoginResult();
+		com.microsoft.playwright.Page pwPage = null;
+		Browser browser = null;
+		try
 		{
-			com.microsoft.playwright.Page pwPage = null;
-			Browser browser = null;
-			try 
+			Playwright playwright = Playwright.create();
+			var options1 = new BrowserType.LaunchOptions().setHeadless(true);
+			if (proxyConfig != null && proxyConfig.getProxyHost() != null)
 			{
-				Playwright playwright = Playwright.create(); 
-				var headless = false;
-				var options1 = new BrowserType.LaunchOptions().setHeadless(headless);
-				if (proxyConfig != null && proxyConfig.getProxyHost() != null)
-				{
-					var proxy = proxyConfig.getProxyScheme()+"://" + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort();
-					options1.setProxy(proxy);
-				}
-				browser = playwright.firefox().launch(options1);
+				var proxy = proxyConfig.getProxyScheme()+"://" + proxyConfig.getProxyHost() + ":" + proxyConfig.getProxyPort();
+				options1.setProxy(proxy);
+			}
+			browser = playwright.firefox().launch(options1);
 
-				var stealthContext = Stealth4j.newStealthContext(browser, Stealth4jConfig.builder().navigatorLanguages(true, List.of("de-DE", "de")).build());
-				stealthContext.setExtraHTTPHeaders(Map.of("DNT", "1"));
-				pwPage = stealthContext.newPage();
+			var stealthContext = Stealth4j.newStealthContext(browser, Stealth4jConfig.builder().navigatorLanguages(true, List.of("de-DE", "de")).build());
+			stealthContext.setExtraHTTPHeaders(Map.of("DNT", "1"));
+			pwPage = stealthContext.newPage();
 
-				pwPage.navigate(proto + prefix + "." + getClass().getName().substring(25,29).toLowerCase() + "." + getClass().getName().substring(0,2).toLowerCase());
+			pwPage.navigate(proto + prefix + "." + getClass().getName().substring(25,29).toLowerCase() + "." + getClass().getName().substring(0,2).toLowerCase());
 
-				var user = UUID.randomUUID().toString().toUpperCase();
-				var pass = UUID.randomUUID().toString().substring(0,16).toUpperCase();
-				pwPage.locator("xpath=//input[@type='text']").fill(user);
-				pwPage.locator("xpath=//input[@type='password']").fill(pass);
+			var userUpper = user.toUpperCase();
+			try
+			{
+				pwPage.getByLabel("Username", new GetByLabelOptions().setExact(true)).fill(userUpper);
+				var passwordField = pwPage.getByLabel("Password", new GetByLabelOptions().setExact(true));
+				passwordField.fill(passwort);
+				pwPage.locator("[data-id='btnLogin']").focus();
+			}
+			catch (Exception e)
+			{
+				log(Level.ERROR, "Err: " + e.toString());
+				log(Level.ERROR, "HTML: " + pwPage.content());
+				throw e;
+			}
 
-				var loadFinished = new Object() 
-				{
-					public boolean found = false; 				
-				};
-				pwPage.route("**", route -> 
-				{
-					log(Level.INFO, "login called");
-					var req = route.request();
-					var postData = req.postData();
-					if ("POST".equals(req.method()) && postData != null) 
-					{
-						postData = postData.toUpperCase();
-						if (postData.contains(user) && postData.contains(pass))
+			// WICHTIG: waitForResponse() statt onResponse()-Handler. Ein onResponse()-Handler laeuft auf
+			// dem Playwright-Driver-Thread; ein synchroner Folgeaufruf wie resp.text() darin blockiert
+			// diesen Thread fuer immer (Deadlock, ohne Exception/Log) - resp.text() braucht naemlich
+			// genau diesen Thread, um die Antwort ueberhaupt zu empfangen. waitForResponse() blockiert
+			// stattdessen den aufrufenden Thread und liefert die fertige Response zurueck, auf der man
+			// dann gefahrlos text()/headers() aufrufen kann.
+			final var finalPage = pwPage;
+			com.microsoft.playwright.Response resp;
+			try
+			{
+				resp = finalPage.waitForResponse(
+						r ->
 						{
-							urlObj.value = req.url();
-							log(Level.INFO, "login called, load finished");
-							
-							var header = route.request().headers();
-							var m = Map.of(
-									"akamai-bm-telemetry", header.get("akamai-bm-telemetry"),
-									"bbva-user-agent", header.get("bbva-user-agent"),
-									"contactid", header.get("contactid"),
-									"thirdparty-deviceid", header.get("thirdparty-deviceid"),
-									"user-agent", header.getOrDefault("User-Agent", header.getOrDefault("user-agent", ""))
-									);
-							var j = new JSONObject(m);
-							headerText.value = j.toString();
-							try 
-							{
-								konto.setMeta(BBVASynchronizeBackend.META_HEADERS, headerText.value);
-								konto.setMeta(BBVASynchronizeBackend.META_URL, urlObj.value);
-							}
-							catch (RemoteException e) 
-							{
-							}
-							
-							log(Level.INFO, "Header: " + header.get("akamai-bm-telemetry"));
-							loadFinished.found = true;
-						}
-					}
-					
-					route.fulfill(new FulfillOptions().setBody("Ende").setStatus(200));
-				});
-
-				pwPage.locator("xpath=//button[@type='submit']").click();
-				
-				var scOptions = new ScreenshotOptions().setTimeout(1000).setAnimations(ScreenshotAnimations.DISABLED).setFullPage(false).setOmitBackground(true).setType(ScreenshotType.JPEG);
-				int timeout = 600;
-				while (loadFinished.found == false && timeout-- > 0)
-				{
-					try 
-					{
-						pwPage.screenshot(scOptions);
-					}
-					catch (Exception e)
-					{
-						log(Level.DEBUG, "Screenshot meldet " + e);
-					}
-					Thread.sleep(100);
-				}
-				url = urlObj.value;
+							var req = r.request();
+							var postData = req.postData();
+							return "POST".equals(req.method()) && postData != null && postData.toUpperCase().contains(userUpper);
+						},
+						new com.microsoft.playwright.Page.WaitForResponseOptions().setTimeout(60000),
+						() -> finalPage.locator("[data-id='btnLogin']").click());
 			}
-			finally
+			catch (com.microsoft.playwright.PlaywrightException e)
 			{
-				if (pwPage != null) pwPage.close();
-				if (browser != null) browser.close();
+				throw new ApplicationException("Login im Browser fehlgeschlagen oder Zeitüberschreitung: " + e.getMessage());
 			}
+
+			log(Level.INFO, "Login-Antwort erhalten");
+			try
+			{
+				result.json = new JSONObject(resp.text());
+			}
+			catch (Exception e)
+			{
+				log(Level.ERROR, "Login-Antwort ist kein JSON: " + e);
+				log(Level.DEBUG, "Body: " + resp.text());
+				throw new ApplicationException("Login-Antwort ist kein JSON");
+			}
+			var req = resp.request();
+			url = req.url();
+			result.tsec = resp.headers().get("tsec");
+			var reqHeaders = req.headers();
+			result.headers.add(new KeyValue<>(decodeItem("YWthbWFpLWJtLXRlbGVtZXRyeQ=="), reqHeaders.get(decodeItem("YWthbWFpLWJtLXRlbGVtZXRyeQ=="))));
+			result.headers.add(new KeyValue<>(decodeItem("YmJ2YS11c2VyLWFnZW50"), reqHeaders.get(decodeItem("YmJ2YS11c2VyLWFnZW50"))));
+			result.headers.add(new KeyValue<>(decodeItem("Y29udGFjdGlk"), reqHeaders.get(decodeItem("Y29udGFjdGlk"))));
+			result.headers.add(new KeyValue<>(decodeItem("dGhpcmRwYXJ0eS1kZXZpY2VpZA=="), reqHeaders.get(decodeItem("dGhpcmRwYXJ0eS1kZXZpY2VpZA=="))));
+			result.headers.add(new KeyValue<>("user-agent", reqHeaders.getOrDefault("User-Agent", reqHeaders.getOrDefault("user-agent", ""))));
 		}
-		var headerObj = new JSONObject(headerText.value);
-		permanentHeaders.clear();
-		headerObj.toMap().forEach((x,y) -> { permanentHeaders.add(new KeyValue<>(x,y.toString())); });
+		finally
+		{
+			if (pwPage != null) pwPage.close();
+			if (browser != null) browser.close();
+		}
+		return result;
 	}
 
 	/**
@@ -172,58 +161,15 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	@Override
 	public boolean process(Konto konto, boolean fetchSaldo, boolean fetchUmsatz, boolean forceAll, DBIterator<Umsatz> umsaetze, String user, String passwort) throws Exception
 	{
-		fetchPermanentHeaders(konto);
-		
+		var loginResult = browserLogin(konto, user, passwort);
+
 		var headers = new ArrayList<KeyValue<String, String>>();
 		try
 		{
 			WebResult response;
-			JSONObject json;
-			try 
-			{
-				response = doRequest(url, HttpMethod.POST, null, "application/json", "{\"authentication\":{\"consumerID\":\"00000363\",\"authenticationType\":\"02\",\"userID\":\"" + user.toUpperCase() +"\",\"authenticationData\":[{\"authenticationData\":[\"" + passwort + "\"],\"idAuthenticationData\":\"password\"}]}}");
-				json = response.getJSONObject();
-				if (response.getHttpStatus() == 403 || "{}".equals(json.toString()))
-				{
-					throw new Exception();
-				}
-			}
-			catch (Exception e)
-			{
-				konto.setMeta(BBVASynchronizeBackend.META_HEADERS, "");
-				fetchPermanentHeaders(konto);
-				response = doRequest(url, HttpMethod.POST, null, "application/json", "{\"authentication\":{\"consumerID\":\"00000363\",\"authenticationType\":\"02\",\"userID\":\"" + user.toUpperCase() +"\",\"authenticationData\":[{\"authenticationData\":[\"" + passwort + "\"],\"idAuthenticationData\":\"password\"}]}}");
-				json = response.getJSONObject();
-			}
+			JSONObject json = loginResult.json;
 
 			var authState = json.optString("authenticationState");
-			if ("GO_ON".equals(authState))
-			{
-				var multistepProcessId = json.optString("multistepProcessId");
-				response = doRequest(url, HttpMethod.POST, null, "application/json", "{\"authentication\":{\"consumerID\":\"00000363\",\"authenticationType\":\"02\",\"userID\":\"" + user.toUpperCase() +"\",\"multistepProcessId\":\""+ multistepProcessId + "\"}}");
-				json = response.getJSONObject();
-				authState = json.optString("authenticationState");
-				if ("GO_ON".equals(authState))
-				{
-					multistepProcessId = json.optString("multistepProcessId");
-
-					String otp = null;
-					do 
-					{
-						otp = Application.getCallback().askUser("Bitte geben Sie den SMS-Code ein.", "SMS-Code");
-						if (otp == null || otp.isEmpty()) 
-						{
-							throw new ApplicationException("TAN-Abfrage abgebrochen");
-						}
-					}
-					while (otp.length() != 6);
-
-					headers.add(new KeyValue<>("authenticationstate", multistepProcessId));
-					response = doRequest(url, HttpMethod.POST, headers, "application/json", "{\"authentication\":{\"consumerID\":\"00000363\",\"authenticationType\":\"02\",\"userID\":\"" + user.toUpperCase() +"\",\"multistepProcessId\":\"" + multistepProcessId + "\",\"authenticationData\":[{\"authenticationData\":[\"" + otp + "\"],\"idAuthenticationData\":\"otp\"}]}}");
-					json = response.getJSONObject();
-					authState = json.optString("authenticationState");
-				}
-			}
 
 			String userId = null;
 			String personId = null;
@@ -238,14 +184,17 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				}
 			}
 
-			if (!"OK".equals(authState) && userId != null && personId != null)
+			if (!"OK".equals(authState) || userId == null || personId == null)
 			{
-				log(Level.DEBUG, "Response: " + response.getContent());
+				log(Level.DEBUG, "Response: " + json.toString());
 				throw new ApplicationException("Login fehlgeschlagen! AuthState ist " + authState);
 			}
 
-			headers.clear();
-			updateTsec(response, headers);
+			headers.addAll(loginResult.headers);
+			if (loginResult.tsec != null)
+			{
+				headers.add(new KeyValue<>("tsec", loginResult.tsec));
+			}
 
 			ArrayList<KeyValue<String, String>> tsecheaders = new ArrayList<>();
 			headers.forEach(c -> { if ("tsec".equals(c.getKey())) tsecheaders.add(new KeyValue<>("x-tsec-token", c.getValue())); });

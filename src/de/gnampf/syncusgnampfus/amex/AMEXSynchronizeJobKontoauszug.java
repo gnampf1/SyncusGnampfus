@@ -1,12 +1,10 @@
 package de.gnampf.syncusgnampfus.amex;
 
-import java.nio.charset.StandardCharsets;
 import java.rmi.RemoteException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -20,10 +18,6 @@ import org.json.JSONObject;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
-import okhttp3.Response;
-import okhttp3.sse.EventSource;
-import okhttp3.sse.EventSourceListener;
-import okhttp3.sse.EventSources;
 
 import de.gnampf.syncusgnampfus.KeyValue;
 import de.gnampf.syncusgnampfus.SyncusGnampfusSynchronizeJob;
@@ -43,8 +37,6 @@ import de.willuhn.util.ApplicationException;
 
 public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {
-	private static SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
-
 	private static final String AMEX_HEADER_1       = decodeItem("Y29tLmFtZXJpY2FuZXhwcmVzcy5hbmRyb2lkLmFjY3RzdmNzLmRl");
 	private static final String AMEX_HEADER_2  = decodeItem("Ny4yOS4w");
 	private static final String AMEX_HEADER_3     = decodeItem("QU1FWA==");
@@ -65,15 +57,77 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 	@Override
 	protected SynchronizeBackend getBackend() { return backend; }
 
-	private WebResult MobileLogin(Konto konto, String user, String passwort) throws Exception
+	private String rawToken;
+	private String gatekeeper;
+	private String bbValues;
+	private String deviceId;
+	private String instanceId;
+
+	private ArrayList<KeyValue<String, String>> headerList(String accountToken)
 	{
-		log(Level.INFO, "Mobiler Login gestartet");
-		mobileCookieJar.clear();
+		var now = System.currentTimeMillis();
+		var isoUtc = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+		isoUtc.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+		var headers = new ArrayList<KeyValue<String, String>>();
+		headers.add(new KeyValue<>("Accept", "application/json"));
+		headers.add(new KeyValue<>("Content-Type", "application/json"));
+		headers.add(new KeyValue<>("Authorization", decodeItem("QU1BVCA=") + rawToken));
+		if (accountToken != null) headers.add(new KeyValue<>(decodeItem("eC1heHAtYWNjb3VudC10b2tlbg=="), accountToken));
+		if (gatekeeper != null) headers.add(new KeyValue<>(decodeItem("eC1heHAtZ2F0ZWtlZXBlcg=="), gatekeeper));
+		if (bbValues != null) headers.add(new KeyValue<>(decodeItem("eC1heHAtYmx1ZWJveHZhbHVlcw=="), bbValues));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtdGltZXpvbmVvZmZzZXQ="), String.valueOf(java.util.TimeZone.getDefault().getOffset(now))));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtcHVibGljLWd1aWQ="), "UNAVAILABLE"));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtb3M="), "Android"));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtcmVxdWVzdC1pZA=="), UUID.randomUUID().toString()));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZ2l0LXNoYQ=="), AMEX_HEADER_5));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtbWFudWZhY3R1cmVy"), AMEX_HEADER_8));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLXRpbWU="), isoUtc.format(new java.util.Date(now))));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLXRpbWV6b25lLW5hbWU="), java.time.ZoneId.systemDefault().getId()));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtbG9jYWxlcw=="), decodeItem("eC1heHAtbG9jYWxlcw==") + ": " + AMEX_HEADER_6));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLWlk"), AMEX_HEADER_1));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLXZlcnNpb24="), AMEX_HEADER_2));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLW5hbWU="), AMEX_HEADER_3));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtaW5zdGFuY2UtaWQ="), instanceId));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLWNvZGUtbmFtZQ=="), AMEX_HEADER_10));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLWlk"), deviceId));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLW1vZGVs"), AMEX_HEADER_9));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtb3MtdmVyc2lvbg=="), AMEX_HEADER_7));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLW1hcmtldA=="), AMEX_HEADER_4));
+		headers.add(new KeyValue<>("User-Agent", AMEX_HEADER_11));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtcHJvY2Vzcy1pZA=="), UUID.randomUUID().toString()));
+		return headers;
+	}
+
+	private WebResult doRequest(String url, String accountToken) throws Exception
+	{
+		return doRequest(url, accountToken, null);
+	}
+
+	private WebResult doRequest(String url, String accountToken, String jsonBody) throws Exception
+	{
+		var reqBuilder = new Request.Builder().url(url);
+		for (var h : headerList(accountToken))
+		{
+			reqBuilder.header(h.getKey(), h.getValue());
+		}
+		if (jsonBody != null)
+		{
+			reqBuilder.post(RequestBody.create(jsonBody, MediaType.parse("application/json; charset=UTF-8")));
+		}
+		try (var rawResponse = client().newCall(reqBuilder.build()).execute())
+		{
+			var rawBody = rawResponse.body() != null ? rawResponse.body().string() : "";
+			return new WebResult(rawResponse.code(), rawBody, new ArrayList<>());
+		}
+	}
+
+	private WebResult login(Konto konto, String user, String passwort) throws Exception
+	{
+		log(Level.INFO, "Login gestartet");
+		cookieJar.clear();
 
 		// DeviceID und InstanceID aus gespeicherten Cookies lesen oder neu erzeugen.
 		// Beide müssen über Läufe hinweg stabil bleiben, damit das Gerät wiedererkannt wird
-		String deviceId = null;
-		String instanceId = null;
 		var cookiesJSON = new JSONArray(konto.getMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, "[]"));
 		for (var c : cookiesJSON)
 		{
@@ -105,8 +159,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			log(Level.INFO, "Neue InstanceID erzeugt");
 		}
 
-		final String finalDeviceId = deviceId;
-		final String finalInstanceId = instanceId;
 		final String processId = UUID.randomUUID().toString();
 
 		long nowMillis = System.currentTimeMillis();
@@ -128,9 +180,9 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLWlk"),                AMEX_HEADER_1));
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLXZlcnNpb24="),           AMEX_HEADER_2));
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLW5hbWU="),              AMEX_HEADER_3));
-		headers.add(new KeyValue<>(decodeItem("eC1heHAtaW5zdGFuY2UtaWQ="),           finalInstanceId));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtaW5zdGFuY2UtaWQ="),           instanceId));
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLWNvZGUtbmFtZQ=="),      AMEX_HEADER_10));
-		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLWlk"),             finalDeviceId));
+		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLWlk"),             deviceId));
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtZGV2aWNlLW1vZGVs"),          AMEX_HEADER_9));
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtb3MtdmVyc2lvbg=="),            AMEX_HEADER_7));
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtYXBwLW1hcmtldA=="),            AMEX_HEADER_4));
@@ -138,7 +190,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtcHJvY2Vzcy1pZA=="),            processId));
 		headers.add(new KeyValue<>(decodeItem("eC1heHAtcmVxdWVzdC1zZXF1ZW5jZQ=="),      "1"));
 
-		var mobileLoginCookies = new ArrayList<String[]>();
+		var cookies = new ArrayList<String[]>();
 
 		var cardArtRequest = new JSONArray();
 		var cardArt = new JSONObject();
@@ -157,15 +209,15 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		loginBody.put("loginCredentials", loginCredentials);
 		loginBody.put("cardArtRequest", cardArtRequest);
 
-		log(Level.INFO, "Sende mobilen Login-Request");
-		var loginResult = mobileHttpRequest(
+		log(Level.INFO, "Sende Login-Request");
+		var loginResult = doRequest(
 			decodeItem("aHR0cHM6Ly9tb2JpbGVvbmUuYW1lcmljYW5leHByZXNzLmNvbS9tb2JpbGVvbmUvbXNsL3NlcnZpY2VzL2FjY291bnRzZXJ2aWNpbmcvdjEvbG9naW5zdW1tYXJ5"),
-			"POST", headers, "application/json; charset=UTF-8", loginBody.toString(), mobileLoginCookies, null);
+			"POST", headers, "application/json; charset=UTF-8", loginBody.toString(), cookies, null);
 
 		int loginStatus = Integer.parseInt(loginResult[0]);
 		String loginBody2 = loginResult[1];
-		log(Level.INFO, "Mobiler Login-Status: " + loginStatus);
-		log(Level.INFO, "Mobiler Login-Response: " + loginBody2);
+		log(Level.INFO, "Login-Status: " + loginStatus);
+		log(Level.INFO, "Login-Response: " + loginBody2);
 
 		if (loginStatus == 403)
 		{
@@ -175,7 +227,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		if (loginStatus != 200)
 		{
 			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "" + (Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) + 1));
-			throw new ApplicationException("Mobiler Login fehlgeschlagen, HTTP-Status: " + loginStatus + " - " + loginBody2);
+			throw new ApplicationException("Login fehlgeschlagen, HTTP-Status: " + loginStatus + " - " + loginBody2);
 		}
 
 		var loginJson = new JSONObject(loginBody2);
@@ -188,7 +240,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			konto.setMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "" + (Integer.parseInt(konto.getMeta(AMEXSynchronizeBackend.META_ERRCOUNT, "0")) + 1));
 			String reportingCode = statusObj != null ? statusObj.optString("reportingCode", "") : "";
 			String message = statusObj != null ? statusObj.optString("message", "") : "";
-			log(Level.INFO, "Mobiler Login abgelehnt: reportingCode=" + reportingCode
+			log(Level.INFO, "Login abgelehnt: reportingCode=" + reportingCode
 					+ ", legacyCode=" + (statusObj != null ? statusObj.optString("legacyCode", "") : "")
 					+ ", message=" + message);
 			if ("LOGON1001".equals(reportingCode))
@@ -207,21 +259,25 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		if (logonData != null)
 		{
 			String cupcake = logonData.optString("cupcake", null);
-			String gatekeeperCookie = logonData.optString("gateKeeperCookie", null);
+			String gkCookie = logonData.optString("gateKeeperCookie", null);
 			if (cupcake != null && !cupcake.isBlank())
 			{
 				log(Level.INFO, "Setze blueboxvalues-Cookie");
-				mobileCookieJar.put("blueboxvalues", cupcake);
+				cookieJar.put("blueboxvalues", cupcake);
 			}
-			if (gatekeeperCookie != null && !gatekeeperCookie.isBlank())
+			if (gkCookie != null && !gkCookie.isBlank())
 			{
 				log(Level.INFO, "Setze gatekeeper-Cookie");
-				mobileCookieJar.put("gatekeeper", gatekeeperCookie);
+				cookieJar.put("gatekeeper", gkCookie);
 			}
+			gatekeeper = gkCookie;
+			bbValues = cupcake;
+			var jsonWebToken = logonData.optJSONObject("jsonWebToken");
+			rawToken = jsonWebToken != null ? jsonWebToken.optString("rawToken", null) : null;
 		}
 		// device-id ebenfalls in den okhttp-Jar (für den browserlosen Datenabruf)
-		mobileCookieJar.put("device-id", finalDeviceId);
-		mobileCookieJar.put("instance-id", finalInstanceId);
+		cookieJar.put("device-id", deviceId);
+		cookieJar.put("instance-id", instanceId);
 
 		// device-id- und instance-id-Cookie setzen, damit der nächste Login sofort als
 		// bekanntes Gerät erkannt wird und dieselbe Instance-ID wiederverwendet wird.
@@ -230,100 +286,6 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		permanentHeaders.clear();
 
 		return new WebResult(loginStatus, loginBody2, null);
-	}
-	
-	private String[] streamingLogin(String url, List<KeyValue<String, String>> headers,
-			String body, List<String[]> outSetCookies) throws Exception
-	{
-		Request.Builder reqBuilder = new Request.Builder().url(url);
-		if (headers != null)
-		{
-			for (var h : headers)
-			{
-				reqBuilder.header(h.getKey(), h.getValue());
-			}
-		}
-		if (!mobileCookieJar.isEmpty())
-		{
-			var cookieHeader = new StringBuilder();
-			for (var entry : mobileCookieJar.entrySet())
-			{
-				if (cookieHeader.length() > 0) cookieHeader.append("; ");
-				cookieHeader.append(entry.getKey()).append("=").append(entry.getValue());
-			}
-			reqBuilder.header("Cookie", cookieHeader.toString());
-		}
-		MediaType mt = MediaType.parse("application/json; charset=UTF-8");
-		reqBuilder.post(RequestBody.create(body.getBytes(StandardCharsets.UTF_8), mt));
-		Request request = reqBuilder.build();
-
-		final java.util.concurrent.atomic.AtomicReference<String> loginJson = new java.util.concurrent.atomic.AtomicReference<>();
-		final java.util.concurrent.atomic.AtomicReference<String[]> httpError = new java.util.concurrent.atomic.AtomicReference<>();
-		final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
-
-		EventSource eventSource = EventSources.createFactory(mobileClient()).newEventSource(request, new EventSourceListener()
-		{
-			@Override
-			public void onOpen(EventSource es, Response response)
-			{
-				for (String setCookieVal : response.headers("Set-Cookie"))
-				{
-					String nameValue = setCookieVal.split(";")[0].trim();
-					int eq = nameValue.indexOf('=');
-					if (eq > 0)
-					{
-						String cName  = nameValue.substring(0, eq).trim();
-						String cValue = nameValue.substring(eq + 1).trim();
-						mobileCookieJar.put(cName, cValue);
-						if (outSetCookies != null) outSetCookies.add(new String[]{ cName, cValue });
-					}
-				}
-			}
-
-			@Override
-			public void onEvent(EventSource es, String id, String type, String data)
-			{
-				log(Level.INFO, "SSE-Event type=" + type + ", len=" + (data != null ? data.length() : 0));
-				if (data == null || data.isBlank()) return;
-				// Login-Antwort erkennen (Erfolg: logonData; Ablehnung: reportingCode/twoStepLogin)
-				boolean isLogin = data.contains("\"logonData\"")
-						|| data.contains("\"reportingCode\"")
-						|| data.contains("\"twoStepLogin\"");
-				if (isLogin && loginJson.compareAndSet(null, data))
-				{
-					es.cancel();
-					latch.countDown();
-				}
-			}
-
-			@Override
-			public void onFailure(EventSource es, Throwable t, Response response)
-			{
-				if (loginJson.get() == null)
-				{
-					int code = response != null ? response.code() : -1;
-					String rbody = "";
-					try { if (response != null && response.body() != null) rbody = response.body().string(); }
-					catch (Exception ignore) {}
-					if ((rbody == null || rbody.isBlank()) && t != null) rbody = t.toString();
-					httpError.set(new String[]{ String.valueOf(code), rbody });
-				}
-				latch.countDown();
-			}
-
-			@Override
-			public void onClosed(EventSource es)
-			{
-				latch.countDown();
-			}
-		});
-
-		boolean completed = latch.await(45, java.util.concurrent.TimeUnit.SECONDS);
-		eventSource.cancel();
-
-		if (loginJson.get() != null) return new String[]{ "200", loginJson.get() };
-		if (httpError.get() != null) return httpError.get();
-		return new String[]{ "0", "Streaming-Login: keine Login-Antwort erhalten (Timeout=" + !completed + ")" };
 	}
 
 	@Override
@@ -355,9 +317,9 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				konto.setMeta(AMEXSynchronizeBackend.META_DEVICECOOKIES, null);
 			}
 
-		var result = MobileLogin(konto, user, passwort);
+		var result = login(konto, user, passwort);
 
-		// logonData.reauth aus mobiler Login-Antwort lesen
+		// logonData.reauth aus Login-Antwort lesen
 		var loginRespJson = result.getJSONObject();
 		var logonDataObj = loginRespJson.optJSONObject("logonData");
 		var reAuth = logonDataObj != null ? logonDataObj.optJSONObject("reauth") : null;
@@ -560,11 +522,11 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			if ("true".equals(konto.getMeta(AMEXSynchronizeBackend.META_TRUST, "true")))
 			{
 				// device-id/instance-id im Konto persistieren, damit sie über Neustarts hinweg
-				// stabil bleiben. mobileCookieJar hält beide nach dem Login.
+				// stabil bleiben. cookieJar hält beide nach dem Login.
 				var cookiesJSON = new JSONArray();
 				for (var name : new String[]{ "device-id", "instance-id" })
 				{
-					var value = mobileCookieJar.get(name);
+					var value = cookieJar.get(name);
 					if (value != null && !value.isBlank())
 					{
 						cookiesJSON.put(new JSONObject().put("name", name).put("value", value));
@@ -574,18 +536,22 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			}
 
 			var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, null);
+
+			log(Level.INFO, "Aktualisiere Sitzung...");
+			var pageResponse = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hY3Rpdml0eS9yZWNlbnQ/YXBwdjU9ZmFsc2U="), HttpMethod.GET, null, null, null, true);
+			if (pageResponse.getHttpStatus() != 200)
+			{
+				log(Level.DEBUG, "Response: " + pageResponse.getContent());
+				throw new ApplicationException("Abfrage Konten fehlgeschlagen, Status = " + pageResponse.getHttpStatus());
+			}
+
 			if (accountToken == null || accountToken.isBlank())
 			{
 				log(Level.INFO, "Ermittle AccountToken (neue Variante)");
 				JSONObject initialStateObj = new JSONObject();
-				try 
+				try
 				{
-					var response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hY3Rpdml0eS9yZWNlbnQ/YXBwdjU9ZmFsc2U="), HttpMethod.GET, null, null, null, true);
-					if (response.getHttpStatus() != 200)
-					{
-						log(Level.DEBUG, "Response: " + response.getContent());
-						throw new ApplicationException("Abfrage Konten fehlgeschlagen, Status = " + response.getHttpStatus());
-					}
+					var response = pageResponse;
 
 					// AccountToken ueber die Seite ermitteln: htmlunit fuehrt die Seiten-JS aus,
 					// die window.__INITIAL_STATE__ aufbaut (kein Inline-Script vorhanden).
@@ -663,6 +629,11 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			}
 			ArrayList<KeyValue<String, String>> header = new ArrayList<>();
 			header.add(new KeyValue<>("account_token", accountToken));
+			header.add(new KeyValue<>("account_tokens", accountToken));
+			header.add(new KeyValue<>("Correlation_id", "MYCA-" + UUID.randomUUID()));
+			header.add(new KeyValue<>("Content-Type", "application/json"));
+			header.add(new KeyValue<>("Accept", "application/json"));
+			header.add(new KeyValue<>("Referer", "https://global.americanexpress.com/activity/recent"));
 
 			var response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvYmFsYW5jZXM="), HttpMethod.GET, header, null, null, true);
 			if (response.getHttpStatus() != 200)
@@ -692,16 +663,55 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			if (fetchUmsatz) 
 			{
 				log(Level.INFO, "Hole Reservierungen");
-				response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvdHJhbnNhY3Rpb25zP2xpbWl0PTEwMDAmc3RhdHVzPXBlbmRpbmcmZXh0ZW5kZWRfZGV0YWlscz1tZXJjaGFudA=="), HttpMethod.GET, header, null, null, true);
+				var now = System.currentTimeMillis();
+				var localTimeFormat = new SimpleDateFormat("MM-dd-yyyy'T'hh:mm:ss a z", java.util.Locale.US);
+				var timelineBody = new JSONObject();
+				timelineBody.put("sortedIndex", 0);
+				timelineBody.put("localTime", localTimeFormat.format(new java.util.Date(now)));
+				timelineBody.put("timeZone", java.util.TimeZone.getDefault().getDisplayName(false, java.util.TimeZone.SHORT));
+				timelineBody.put("timestampInMilli", String.valueOf(now));
+				timelineBody.put("timeZoneOffsetInMilli", String.valueOf(java.util.TimeZone.getDefault().getOffset(now)));
+				timelineBody.put("pendingChargeEnabled", true);
+				timelineBody.put("cmlEnabled", false);
+				timelineBody.put("payWithPointsEnabled", false);
+				timelineBody.put("pushEnabled", false);
+				timelineBody.put("goodsSvcOfferEnabled", false);
+				timelineBody.put("payYourWayEnabled", false);
+				response = doRequest(decodeItem("aHR0cHM6Ly9tb2JpbGVvbmUuYW1lcmljYW5leHByZXNzLmNvbS9tb2JpbGVvbmUvbXNsL3NlcnZpY2VzL3RpbWVsaW5lL3YxL3RpbWVsaW5lRGV0YWls"), accountToken, timelineBody.toString());
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
-					throw new ApplicationException("Abruf unverbuchter Transaktionen fehlgeschlagen, Status = " + response.getHttpStatus());
+					throw new ApplicationException("Abruf Reservierungen fehlgeschlagen, Status = " + response.getHttpStatus());
 				}
-				var duplikate = processTransactions(konto, neueUmsaetze, umsaetze, response.getJSONObject().getJSONArray("transactions"), true, null);				
+				var timeline = response.getJSONObject().getJSONObject("timeline");
+				var transactionMap = timeline.optJSONObject("transactionMap");
+				var timelineItems = timeline.optJSONArray("timelineItems");
+				var pendingTransactions = new JSONArray();
+				if (timelineItems != null && transactionMap != null)
+				{
+					for (var itemObj : timelineItems)
+					{
+						var subItems = ((JSONObject) itemObj).optJSONArray("subItems");
+						if (subItems == null) continue;
+						for (var subItemObj : subItems)
+						{
+							var subItem = (JSONObject) subItemObj;
+							if ("pendingTransaction".equals(subItem.optString("type")))
+							{
+								var transaction = transactionMap.optJSONObject(subItem.getString("id"));
+								if (transaction != null)
+								{
+									pendingTransactions.put(transaction);
+								}
+							}
+						}
+					}
+				}
+				var duplikate = processTransactions(konto, neueUmsaetze, umsaetze, pendingTransactions, null, true);
+
 				monitor.setPercentComplete(30);
-				
-				log(Level.INFO, "L\u00f6sche nicht mehr existierende Reservierungen");
+
+				log(Level.INFO, "Lösche nicht mehr existierende Reservierungen");
 				deleteMissingUnbooked(duplikate);
 				monitor.setPercentComplete(35);
 
@@ -713,20 +723,36 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					throw new ApplicationException("Abruf Buchungsperioden fehlgeschlagen, Status = " + response.getHttpStatus());
 				}
 				var periods = response.getJSONArray();
+
 				monitor.setPercentComplete(40);
 				int step = 50 / periods.length();
 				for (var periodObj : periods)
 				{
 					var period = (JSONObject)periodObj;
-					log(Level.INFO, "Abruf Buchungen " +period.getString("statement_start_date") + " bis " + period.getString("statement_end_date"));
+					var statementEndDate = period.getString("statement_end_date");
+					log(Level.INFO, "Abruf Buchungen " +period.getString("statement_start_date") + " bis " + statementEndDate);
 
-					response = doRequest(decodeItem("aHR0cHM6Ly9nbG9iYWwuYW1lcmljYW5leHByZXNzLmNvbS9hcGkvc2VydmljaW5nL3YxL2ZpbmFuY2lhbHMvdHJhbnNhY3Rpb25zP2xpbWl0PTEwMDAmZXh0ZW5kZWRfZGV0YWlscz1tZXJjaGFudCZzdGF0ZW1lbnRfZW5kX2RhdGU9") + period.getString("statement_end_date") + "&status=posted", HttpMethod.GET, header, null, null, true);
-					if (response.getHttpStatus() != 200)
+					var neueDuplikate = new ArrayList<Umsatz>();
+					int offset = 0;
+					while (true)
 					{
-						log(Level.DEBUG, "Request: " + response.getContent());
-						throw new ApplicationException("Abruf Buchungen " +period.getString("statement_start_date") + " bis " + period.getString("statement_end_date") + " fehlgeschlagen, Status = " + response.getHttpStatus());
+						var transactionsUrl = decodeItem("aHR0cHM6Ly9tb2JpbGVvbmUuYW1lcmljYW5leHByZXNzLmNvbS9tb2JpbGVvbmUvbXNsL3NlcnZpY2VzL3N0YXRlbWVudHMvdjEvdHJhbnNhY3Rpb25zP2VuZERhdGU9")
+								+ statementEndDate + "&offset=" + offset + "&sort=NEWEST";
+						response = doRequest(transactionsUrl, accountToken);
+						if (response.getHttpStatus() != 200)
+						{
+							log(Level.DEBUG, "Request: " + response.getContent());
+							throw new ApplicationException("Abruf Buchungen " +period.getString("statement_start_date") + " bis " + statementEndDate + " fehlgeschlagen, Status = " + response.getHttpStatus());
+						}
+						var transactions = response.getJSONObject().getJSONObject("data").optJSONArray("transactions");
+						if (transactions == null || transactions.length() == 0)
+						{
+							break;
+						}
+						neueDuplikate.addAll(processTransactions(konto, neueUmsaetze, umsaetze, transactions, saldo, false));
+						offset += transactions.length();
 					}
-					if (!forceAll && !processTransactions(konto, neueUmsaetze, umsaetze, response.getJSONObject().getJSONArray("transactions"), false, saldo).isEmpty())
+					if (!forceAll && !neueDuplikate.isEmpty())
 					{
 						break;
 					}
@@ -752,69 +778,67 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 		public SaldoContainer() {}
 	}
 
-	private ArrayList<Umsatz> processTransactions(Konto konto, ArrayList<Umsatz> neueUmsaetze, DBIterator<Umsatz> vorhandeneUmsaetze, JSONArray transactions, boolean pending, SaldoContainer saldo) throws RemoteException, ParseException, ApplicationException
+	private static final SimpleDateFormat chargeDateFormat = new SimpleDateFormat("yyyyMMdd");
+
+	private ArrayList<Umsatz> processTransactions(Konto konto, ArrayList<Umsatz> neueUmsaetze, DBIterator<Umsatz> vorhandeneUmsaetze, JSONArray transactions, SaldoContainer saldo, boolean pending) throws RemoteException, ParseException, ApplicationException
 	{
-		var kontoNr = konto.getUnterkonto();
 		var duplikate = new ArrayList<Umsatz>();
-		var multiCard = konto.getMeta(AMEXSynchronizeBackend.META_MULTICARD, "false") == "true";
-		var accountToken = konto.getMeta(AMEXSynchronizeBackend.META_ACCOUNTTOKEN, "");
-		
+
 		for (var transObj : transactions)
 		{
-			var transaction = (JSONObject)transObj;
-			if (
-					(!multiCard && kontoNr.equals(transaction.optString("display_account_number"))) ||
-					(multiCard && accountToken.equals(transaction.optString("account_token")))
-				)
+			var transaction = (JSONObject) transObj;
+			var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class, null);
+			newUmsatz.setKonto(konto);
+			if (pending)
 			{
-				var newUmsatz = (Umsatz) Settings.getDBService().createObject(Umsatz.class,null);
-				newUmsatz.setKonto(konto);
-				if (pending)
+				newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
+			}
+			var transactionId = transaction.optString("transactionId", transaction.optString("transactionReference"));
+			newUmsatz.setTransactionId(transactionId);
+			var description = transaction.optJSONArray("description");
+			var zweck = description != null && description.length() > 0 ? description.getString(0) : "";
+			newUmsatz.setZweck(zweck.replaceAll(" +", " "));
+			var chargeDate = chargeDateFormat.parse(String.valueOf(transaction.getJSONObject("chargeDate").getInt("rawValue")));
+			newUmsatz.setDatum(chargeDate);
+			newUmsatz.setValuta(chargeDate);
+			var betrag = -transaction.getJSONObject("amount").getDouble("rawValue");
+			newUmsatz.setBetrag(betrag);
+			newUmsatz.setCustomerRef(transaction.optString("transactionReference"));
+			if (saldo != null)
+			{
+				newUmsatz.setSaldo(saldo.value);
+				saldo.value -= betrag;
+			}
+			var extended = transaction.optJSONObject("extendedTransactionDetails");
+			if (extended != null)
+			{
+				var merchantName = extended.optString("merchantName", null);
+				if (merchantName != null)
 				{
-					newUmsatz.setFlags(Umsatz.FLAG_NOTBOOKED);
+					newUmsatz.setGegenkontoName(merchantName);
 				}
-				newUmsatz.setTransactionId(transaction.optString("identifier"));
-				newUmsatz.setZweck(transaction.optString("description").replaceAll(" +", " "));
-				newUmsatz.setDatum(dateFormat.parse(transaction.getString("charge_date")));
-				newUmsatz.setValuta(dateFormat.parse(transaction.getString("charge_date")));
-				newUmsatz.setBetrag(-transaction.optDouble("amount"));
-				newUmsatz.setCustomerRef(transaction.optString("reference_id"));
-				if (saldo != null)
+			}
+
+			Umsatz vorhandenerUmsatz = getDuplicateById(newUmsatz);
+			if (vorhandenerUmsatz != null)
+			{
+				if (!pending && vorhandenerUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
 				{
-					newUmsatz.setSaldo(saldo.value);
-					saldo.value -= newUmsatz.getBetrag();
+					vorhandenerUmsatz.setFlags(Umsatz.FLAG_NONE);
+					vorhandenerUmsatz.store();
+					Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
 				}
-				var extended = transaction.optJSONObject("extended_details");
-				if (extended != null)
+				if (vorhandenerUmsatz.getTransactionId() == null)
 				{
-					var merchant = extended.optJSONArray("merchant");
-					if (merchant != null)
-					{
-						newUmsatz.setGegenkontoName(extended.optString("display_name"));
-					}
+					vorhandenerUmsatz.setTransactionId(newUmsatz.getTransactionId());
+					vorhandenerUmsatz.store();
+					Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
 				}
-	
-				Umsatz vorhandenerUmsatz = getDuplicateById(newUmsatz);
-				if (vorhandenerUmsatz != null) 
-				{
-					if (!pending && vorhandenerUmsatz.hasFlag(Umsatz.FLAG_NOTBOOKED))
-					{
-						vorhandenerUmsatz.setFlags(Umsatz.FLAG_NONE);
-						vorhandenerUmsatz.store();
-						Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
-					}
-					if (vorhandenerUmsatz.getTransactionId() == null)
-					{
-						vorhandenerUmsatz.setTransactionId(newUmsatz.getTransactionId());
-						vorhandenerUmsatz.store();
-						Application.getMessagingFactory().sendMessage(new ObjectChangedMessage(vorhandenerUmsatz));
-					}
-					duplikate.add(vorhandenerUmsatz);
-				}
-				else
-				{
-					neueUmsaetze.add(newUmsatz);
-				}
+				duplikate.add(vorhandenerUmsatz);
+			}
+			else
+			{
+				neueUmsaetze.add(newUmsatz);
 			}
 		}
 		return duplikate;
