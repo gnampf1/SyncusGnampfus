@@ -148,7 +148,11 @@ final class ScalableCapitalOkLogin {
     String portfolioId = firstNonNull(
         firstGroup(Pattern.compile("[?&]portfolioId=([A-Za-z0-9_-]+)"), txUrl),
         firstGroup(Pattern.compile("BrokerValuation:([A-Za-z0-9_-]+)"), nextData),
-        firstGroup(Pattern.compile("\"portfolioId\":\"([^\"]+)\""), nextData));
+        firstGroup(Pattern.compile("\"portfolioId\":\"([^\"]+)\""), nextData),
+        // Fallback fuer Konten ohne aktives Brokerportfolio (z.B. reines Verrechnungskonto ohne
+        // Wertpapiere): hier fehlt der BrokerValuation-Cache-Eintrag, die ID steckt stattdessen
+        // im ersten Eintrag von "minorPortfolios". Noch nicht an echten Daten verifiziert.
+        firstGroup(Pattern.compile("\"minorPortfolios\"\\s*:\\s*\\[\\s*\\{[^}]*?\"id\"\\s*:\\s*\"([^\"]+)\""), nextData));
     String personId = firstNonNull(
         firstGroup(Pattern.compile("\"personId\":\"([^\"]+)\""), nextData),
         firstGroup(Pattern.compile("Account:([A-Za-z0-9_-]+)"), nextData));
@@ -240,6 +244,12 @@ final class ScalableCapitalOkLogin {
         log.accept("[SC-Login]   Kontext um '" + needle + "': \u2026"
             + nextData.substring(a, z).replaceAll("\\s+", " ") + "\u2026");
       }
+    }
+    int mp = nextData.indexOf("\"minorPortfolios\"");
+    if (mp >= 0) {
+      int a = Math.max(0, mp - 10), z = Math.min(nextData.length(), mp + 400);
+      log.accept("[SC-Login]   Kontext um 'minorPortfolios' (ausf\u00fchrlich): \u2026"
+          + nextData.substring(a, z).replaceAll("\\s+", " ") + "\u2026");
     }
   }
 
