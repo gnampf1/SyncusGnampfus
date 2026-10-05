@@ -685,7 +685,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 					});
 				}
 
-				if (!isExtSearch && !isKreditkarte && (forceAll || duplikate.size() == 0) && ((nextPage == null) || nextPage.isEmpty())) {
+				if (!isExtSearch && !isKreditkarte && (forceAll || (duplikate.size() == 0 && !neueUmsaetze.isEmpty())) && ((nextPage == null) || nextPage.isEmpty())) {
 					log(Level.DEBUG, "no nextPage info found -> switch to ext search");
 					isExtSearch = true;
 					isExtSearchPending = true;
