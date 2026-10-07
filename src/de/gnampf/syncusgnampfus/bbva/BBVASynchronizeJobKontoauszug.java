@@ -123,7 +123,7 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			}
 			catch (com.microsoft.playwright.PlaywrightException e)
 			{
-				throw new ApplicationException("Login im Browser fehlgeschlagen oder Zeitüberschreitung: " + e.getMessage());
+				throw new ApplicationException("Login im Browser fehlgeschlagen oder Zeit\u00fcberschreitung: " + e.getMessage());
 			}
 
 			log(Level.INFO, "Login-Antwort erhalten");
@@ -216,14 +216,21 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 			contracts.forEach(c -> 
 			{
 				var contract = (JSONObject)c;
-				if (isKreditkarte && kreditkarte.equals(contract.optString("number")))
+				if (isKreditkarte)
 				{
-					contractDetails.ktoContract = contract;
-					return;
+					// Kredit-/Debitkarten ausschliesslich ueber die Kartennummer zuordnen. Die IBAN-
+					// Zuordnung im else-Zweig darf hier NICHT greifen, selbst wenn diese Karte nicht passt:
+					// sonst matcht faelschlich das Konto, dessen IBAN zufaellig im Unterkonto-Feld der
+					// Karte hinterlegt ist (siehe Issue: Kreditkarte fand das verknuepfte Girokonto statt
+					// der eigenen Kartenkontraktdaten, weil beide dieselbe IBAN tragen).
+					if (kreditkarte.equals(contract.optString("number")))
+					{
+						contractDetails.ktoContract = contract;
+					}
 				}
-				else 
+				else
 				{
-					contract.optJSONArray("formats").forEach(f -> 
+					contract.optJSONArray("formats").forEach(f ->
 					{
 						var format = (JSONObject)f;
 						if ("IBAN".equals(format.optJSONObject("numberType").optString("id")) && myIban.equals(format.optString("number")))
@@ -321,7 +328,13 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 						}
 					}
 				}
-	
+				else if (isKreditkarte && contractDetails.availableBalance != null)
+				{
+					// Manche Kredit-/Debitkarten liefern nur "availableBalance" in specificAmounts,
+					// kein separates "currentBalance"/"disposedAmount" (z.B. BBVA Debitkarte).
+					konto.setSaldo(-contractDetails.availableBalance.optDouble("amount"));
+				}
+
 				konto.store();
 				Application.getMessagingFactory().sendMessage(new SaldoMessage(konto));
 			}
@@ -507,7 +520,8 @@ public class BBVASynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 				if (response.getHttpStatus() != 200)
 				{
 					log(Level.DEBUG, "Response: " + response.getContent());
-					throw new ApplicationException("Erweiterte Suche fehlgeschlagen");
+					throw new ApplicationException("Abruf Transaktionen (" + (isKreditkarte ? "Kreditkarte" : "Konto")
+							+ (isExtSearch ? ", erweiterte Suche" : "") + ") fehlgeschlagen, Status = " + response.getHttpStatus());
 				}
 				
 				updateTsec(response, headers);

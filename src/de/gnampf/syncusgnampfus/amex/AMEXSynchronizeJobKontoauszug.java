@@ -711,7 +711,7 @@ public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobK
 
 				monitor.setPercentComplete(30);
 
-				log(Level.INFO, "Lösche nicht mehr existierende Reservierungen");
+				log(Level.INFO, "L\u00f6sche nicht mehr existierende Reservierungen");
 				deleteMissingUnbooked(duplikate);
 				monitor.setPercentComplete(35);
 
