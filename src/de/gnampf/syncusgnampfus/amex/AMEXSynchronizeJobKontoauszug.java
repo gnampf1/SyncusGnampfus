@@ -38,7 +38,7 @@ import de.willuhn.util.ApplicationException;
 public class AMEXSynchronizeJobKontoauszug extends SyncusGnampfusSynchronizeJobKontoauszug implements SyncusGnampfusSynchronizeJob 
 {
 	private static final String AMEX_HEADER_1       = decodeItem("Y29tLmFtZXJpY2FuZXhwcmVzcy5hbmRyb2lkLmFjY3RzdmNzLmRl");
-	private static final String AMEX_HEADER_2  = decodeItem("Ny4yOS4w");
+	private static final String AMEX_HEADER_2  = decodeItem("Ny4zNS4x");
 	private static final String AMEX_HEADER_3     = decodeItem("QU1FWA==");
 	private static final String AMEX_HEADER_4   = decodeItem("ZGU=");
 	private static final String AMEX_HEADER_5      = decodeItem("ODU3ZjI1ODFk");
