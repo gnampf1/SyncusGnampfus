@@ -3,10 +3,10 @@
 <plugin xmlns="http://www.willuhn.de/schema/jameica-plugin"
         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:schemaLocation="http://www.willuhn.de/schema/jameica-plugin http://www.willuhn.de/schema/jameica-plugin-1.2.xsd"
-        name="SyncusGnampfus" version="0.16.0" class="de.gnampf.syncusgnampfus.Plugin">
+        name="SyncusGnampfus" version="0.17.0" class="de.gnampf.syncusgnampfus.Plugin">
 
   <description>Hibiscus Plugin zur Kontensynchronisation für Hanseatic und American Express Kreditkarten, BBVA, Raisin, Scalable Capital</description>
-  <url>https://www.gnampf.cyou/hibiscus/SyncusGnampfus/0.16.0/SyncusGnampfus.zip</url>
+  <url>https://www.gnampf.cyou/hibiscus/SyncusGnampfus/0.17.0/SyncusGnampfus.zip</url>
   <homepage>https://github.com/gnampf1/SyncusGnampfus</homepage>
   <license>GPL - http://www.gnu.org/copyleft/gpl.html</license>
 
@@ -14,14 +14,14 @@
     <import plugin="hibiscus" version="2.6.0+" />
     <!-- Playwright + stealth4j kommen aus dem separaten Bibliotheks-Plugin "Playwright"
          (gemeinsame Nutzung, keine doppelten/kollidierenden Playwright-Jars mehr). -->
-    <import plugin="Playwright" version="1.63.0+" />
+    <import plugin="Playwright" version="1.64.0+" />
     <!-- htmlunit (inkl. seiner transitiven Abhaengigkeiten wie commons-*/httpclient) kommt
          aus dem bestehenden Plugin "hibiscus.scripting.htmlunit" — wir liefern diese Jars
          daher nicht selbst mit. -->
     <import plugin="hibiscus.scripting.htmlunit" version="4.4.0+" />
     <!-- okhttp (+okio, +okhttp-sse) und Conscrypt aus dem "okhttp"-Bibliotheks-Plugin.
          Versionsfloor wird beim Build auf die kompilierte okhttp-Version gesetzt (siehe init). -->
-    <import plugin="okhttp" version="5.5.0+" />
+    <import plugin="okhttp" version="5.5.1+" />
     <!-- org.json aus dem "json"-Bibliotheks-Plugin (bekannte Konfliktquelle -> nur EINE
          gemeinsame Version). Niedriger Floor: wir kompilieren gegen unsere Version, nutzen
          zur Laufzeit die (neuere) des Plugins. -->
@@ -35,4 +35,3 @@
     <include>ext_.*\.jar</include>
   </classfinder>
 </plugin>
-
