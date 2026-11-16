@@ -202,6 +202,9 @@ public class ScalablecapitalSynchronizeJobKontoauszug extends SyncusGnampfusSync
 				if (!x.currency.equals("EUR")) {
 					log(Level.ERROR, "Buchung mit einem nicht Euro-Betrag!");
 				}
+				if (x.status.equals("CANCELLED") || x.status.equals("REJECTED")) {
+					continue;
+				}
 				if (!(x.status.equals("SETTLED") || x.status.equals("FILLED"))) {
 					log(Level.ERROR, "Unbekannter Status: " + x.status + "! Bitte als Bug melden!");
 				}
